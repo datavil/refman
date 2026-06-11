@@ -1,0 +1,150 @@
+import AppKit
+import SwiftUI
+
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+enum SettingsKeys {
+    static let appearance = "appearance"
+    static let agentPath = "agentPath"
+    static let ollamaModel = "ollamaModel"
+}
+
+/// Lists models from a local Ollama for the model picker.
+@MainActor
+final class OllamaModelList: ObservableObject {
+    @Published var models: [String] = []
+    @Published var loadFailed = false
+
+    func load() {
+        Task {
+            do {
+                let host = ProcessInfo.processInfo.environment["REFMAN_OLLAMA_HOST"]
+                    ?? "http://127.0.0.1:11434"
+                let (data, _) = try await URLSession.shared.data(
+                    from: URL(string: "\(host)/api/tags")!)
+                struct Tags: Decodable {
+                    struct Model: Decodable { let name: String }
+                    let models: [Model]
+                }
+                models = try JSONDecoder().decode(Tags.self, from: data).models.map(\.name)
+                loadFailed = false
+            } catch {
+                models = []
+                loadFailed = true
+            }
+        }
+    }
+}
+
+struct SettingsView: View {
+    @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
+    @AppStorage(SettingsKeys.agentPath) private var agentPath = ""
+    @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
+
+    @StateObject private var modelList = OllamaModelList()
+
+    var body: some View {
+        Form {
+            Section("Appearance") {
+                Picker("Theme", selection: $appearance) {
+                    ForEach(AppAppearance.allCases) { option in
+                        Text(option.label).tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section("Assistant Agent") {
+                LabeledContent("Agent") {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(agentPath.isEmpty ? "Bundled refman-agent" : agentPath)
+                            .font(.callout)
+                            .foregroundStyle(agentPath.isEmpty ? .secondary : .primary)
+                            .truncationMode(.middle)
+                            .lineLimit(1)
+                            .frame(maxWidth: 280, alignment: .trailing)
+                        HStack {
+                            Button("Choose…") { chooseAgent() }
+                            if !agentPath.isEmpty {
+                                Button("Use Bundled") { agentPath = "" }
+                            }
+                        }
+                    }
+                }
+                Text(
+                    "Any executable speaking the Agent Client Protocol on stdio works here. "
+                        + "The bundled refman-agent bridges to a local Ollama."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            // Model choice only applies to the bundled Ollama bridge.
+            if agentPath.isEmpty {
+                Section("Ollama Model") {
+                    if modelList.models.isEmpty {
+                        HStack {
+                            TextField(
+                                "Model", text: $ollamaModel,
+                                prompt: Text("largest installed (auto)"))
+                            if modelList.loadFailed {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                                    .help("Could not reach Ollama — is `ollama serve` running?")
+                            }
+                        }
+                    } else {
+                        Picker("Model", selection: $ollamaModel) {
+                            Text("Largest installed (auto)").tag("")
+                            ForEach(modelList.models, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Text("Agent changes apply to newly opened assistant panels.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
+        .onAppear { modelList.load() }
+    }
+
+    private func chooseAgent() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        panel.message = "Choose an ACP-compatible agent executable"
+        if panel.runModal() == .OK, let url = panel.url {
+            agentPath = url.path
+        }
+    }
+}
