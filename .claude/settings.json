@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat)",
+      "Bash(swiftc -o /tmp/icon_preview Sources/RefMan/AppIcon.swift /tmp/icon_preview_main.swift)",
+      "Bash(/tmp/icon_preview)"
+    ]
+  }
+}

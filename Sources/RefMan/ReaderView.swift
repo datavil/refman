@@ -21,11 +21,18 @@ struct ReaderView: View {
                         .position(x: max(rect.midX, 120), y: max(rect.minY - 26, 20))
                         .transition(.opacity)
                 }
+                if let clicked = reader.clickedAnnotation,
+                    let rect = reader.clickedAnnotationRect
+                {
+                    AnnotationBubble(reader: reader, annotation: clicked)
+                        .position(x: max(rect.midX, 60), y: max(rect.minY - 22, 16))
+                        .transition(.opacity)
+                }
             }
             .frame(minWidth: 500)
             if showAnnotations {
                 AnnotationSidebar(reader: reader)
-                    .frame(width: 260)
+                    .frame(width: 364)
             }
             if showAssistant {
                 AssistantPanel(documentId: documentId, pendingQuestion: $pendingQuestion)
@@ -97,12 +104,20 @@ final class ReaderModel: ObservableObject {
     @Published var selectionRect: CGRect?
     /// Set when the user hits “Ask AI” on a selection.
     @Published var askAIRequest: String?
+    /// Annotation the user clicked in the PDF, with its view-space rect,
+    /// for the floating remove button.
+    @Published var clickedAnnotation: RefManCore.Annotation?
+    @Published var clickedAnnotationRect: CGRect?
 
     private(set) var pdfDocument: PDFDocument?
     private var fileURL: URL?
     private var documentId: Int64?
     private var model: AppModel?
     weak var pdfView: PDFView?
+
+    /// PDFKit drops the standard `.name` (/NM) key when writing the file,
+    /// so annotations are tagged with a custom key that does survive a round trip.
+    private static let uuidKey = PDFAnnotationKey(rawValue: "/RefManUUID")
 
     func load(documentId: Int64, model: AppModel) {
         self.documentId = documentId
@@ -120,12 +135,41 @@ final class ReaderModel: ObservableObject {
     func selectionChanged() {
         hasSelection = !(pdfView?.currentSelection?.string?.isEmpty ?? true)
         selectionRect = currentSelectionViewRect()
+        if hasSelection { clearClickedAnnotation() }
     }
 
     /// Re-anchor (or hide) the pen when the document scrolls under a selection.
     func viewGeometryChanged() {
-        guard selectionRect != nil else { return }
-        selectionRect = currentSelectionViewRect()
+        if selectionRect != nil {
+            selectionRect = currentSelectionViewRect()
+        }
+        clearClickedAnnotation()
+    }
+
+    // MARK: - Clicking annotations in the PDF
+
+    func markupClicked(_ pdfAnn: PDFAnnotation, on page: PDFPage) {
+        guard let view = pdfView, let doc = pdfDocument else { return }
+        // A drag-selection over highlighted text is not a click.
+        if !(view.currentSelection?.string?.isEmpty ?? true) { return }
+        let pageIndex = doc.index(for: page)
+        guard
+            let record = annotations.first(where: {
+                $0.pageIndex == pageIndex && pdfAnnotation(for: $0, on: page) === pdfAnn
+            })
+        else { return }
+        var rect = view.convert(pdfAnn.bounds, from: page)
+        if !view.isFlipped {
+            rect.origin.y = view.bounds.height - rect.maxY
+        }
+        clickedAnnotation = record
+        clickedAnnotationRect = rect
+    }
+
+    func clearClickedAnnotation() {
+        guard clickedAnnotation != nil else { return }
+        clickedAnnotation = nil
+        clickedAnnotationRect = nil
     }
 
     private func currentSelectionViewRect() -> CGRect? {
@@ -176,7 +220,7 @@ final class ReaderModel: ObservableObject {
             bounds: noteBounds, forType: .text, withProperties: nil)
         pdfAnnotation.color = .systemOrange
         pdfAnnotation.contents = ""
-        pdfAnnotation.setValue(uuid as NSString, forAnnotationKey: .name)
+        pdfAnnotation.setValue(uuid as NSString, forAnnotationKey: Self.uuidKey)
         page.addAnnotation(pdfAnnotation)
 
         let record = RefManCore.Annotation(
@@ -224,7 +268,7 @@ final class ReaderModel: ObservableObject {
                     NSValue(point: NSPoint(x: quad[i] - union.minX, y: quad[i + 1] - union.minY))
                 }
             }
-            pdfAnnotation.setValue(uuid as NSString, forAnnotationKey: .name)
+            pdfAnnotation.setValue(uuid as NSString, forAnnotationKey: Self.uuidKey)
             page.addAnnotation(pdfAnnotation)
 
             let quadJSON = (try? JSONEncoder().encode(quads))
@@ -277,6 +321,10 @@ final class ReaderModel: ObservableObject {
             let pdfAnn = pdfAnnotation(for: annotation, on: page)
         {
             page.removeAnnotation(pdfAnn)
+            // PDFView does not repaint on removal by itself; the stale
+            // highlight would stay visible until the next scroll.
+            pdfView?.annotationsChanged(on: page)
+            pdfView?.needsDisplay = true
             savePDF()
         }
         try? model.repository.deleteAnnotation(uuid: annotation.uuid)
@@ -286,8 +334,28 @@ final class ReaderModel: ObservableObject {
     private func pdfAnnotation(
         for annotation: RefManCore.Annotation, on page: PDFPage
     ) -> PDFAnnotation? {
-        page.annotations.first {
-            ($0.value(forAnnotationKey: .name) as? String) == annotation.uuid
+        if let match = page.annotations.first(where: {
+            ($0.value(forAnnotationKey: Self.uuidKey) as? String) == annotation.uuid
+        }) {
+            return match
+        }
+        // Markups saved before the UUID key existed carry no identifier in the
+        // PDF; match them by type and the bounding box of their stored quads.
+        guard let json = annotation.quadPoints?.data(using: .utf8),
+            let quads = try? JSONDecoder().decode([[Double]].self, from: json),
+            !quads.isEmpty
+        else { return nil }
+        let xs = quads.flatMap { quad in stride(from: 0, to: quad.count, by: 2).map { quad[$0] } }
+        let ys = quads.flatMap { quad in stride(from: 1, to: quad.count, by: 2).map { quad[$0] } }
+        let bounds = CGRect(
+            x: xs.min()!, y: ys.min()!,
+            width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        let typeName = annotation.kind == .underline ? "Underline" : "Highlight"
+        return page.annotations.first {
+            $0.type == typeName && abs($0.bounds.minX - bounds.minX) < 1
+                && abs($0.bounds.minY - bounds.minY) < 1
+                && abs($0.bounds.maxX - bounds.maxX) < 1
+                && abs($0.bounds.maxY - bounds.maxY) < 1
         }
     }
 
@@ -297,12 +365,46 @@ final class ReaderModel: ObservableObject {
     }
 }
 
+/// PDFView that reports clicks landing on highlight/underline annotations.
+final class MarkupClickPDFView: PDFView {
+    var onMarkupClick: ((PDFAnnotation, PDFPage) -> Void)?
+    var onEmptyClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        var hit: (PDFAnnotation, PDFPage)?
+        if let page = page(for: point, nearest: false) {
+            let pagePoint = convert(point, to: page)
+            if let ann = page.annotations.first(where: {
+                ($0.type == "Highlight" || $0.type == "Underline")
+                    && $0.bounds.contains(pagePoint)
+            }) {
+                hit = (ann, page)
+            }
+        }
+        // Let PDFView handle selection first, so a drag over highlighted
+        // text still selects instead of registering as a click.
+        super.mouseDown(with: event)
+        if let (ann, page) = hit {
+            onMarkupClick?(ann, page)
+        } else {
+            onEmptyClick?()
+        }
+    }
+}
+
 /// NSViewRepresentable wrapper around PDFView.
 struct PDFKitView: NSViewRepresentable {
     @ObservedObject var reader: ReaderModel
 
     func makeNSView(context: Context) -> PDFView {
-        let view = PDFView()
+        let view = MarkupClickPDFView()
+        view.onMarkupClick = { [weak reader] annotation, page in
+            reader?.markupClicked(annotation, on: page)
+        }
+        view.onEmptyClick = { [weak reader] in
+            reader?.clearClickedAnnotation()
+        }
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.document = reader.pdfDocument
@@ -364,56 +466,89 @@ struct SelectionPen: View {
     ]
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ForEach(Self.highlightColors, id: \.name) { entry in
                 Button {
                     reader.addHighlight(color: entry.color)
                 } label: {
                     Circle()
                         .fill(Color(nsColor: entry.color))
-                        .frame(width: 14, height: 14)
-                        .overlay(Circle().strokeBorder(.quaternary))
+                        .frame(width: 13, height: 13)
                 }
                 .buttonStyle(.plain)
                 .help("Highlight \(entry.name.lowercased())")
             }
 
-            Divider().frame(height: 14)
+            separator
 
             Button {
                 reader.addUnderline()
             } label: {
                 Image(systemName: "underline")
+                    .font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
             .help("Underline")
 
             Button {
                 reader.addNoteToSelection()
             } label: {
                 Image(systemName: "note.text.badge.plus")
+                    .font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
             .help("Add note")
 
-            Divider().frame(height: 14)
+            separator
 
             Button {
                 reader.askAI()
             } label: {
                 Label("Ask AI", systemImage: "sparkles")
                     .labelStyle(.titleAndIcon)
-                    .font(.callout)
+                    .font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.purple)
             .help("Ask the assistant about this selection")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
-        .shadow(radius: 3, y: 1)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+
+    private var separator: some View {
+        Rectangle().fill(.quaternary).frame(width: 1, height: 18)
+    }
+}
+
+/// Floating action shown when the user clicks an existing highlight/underline.
+struct AnnotationBubble: View {
+    @ObservedObject var reader: ReaderModel
+    let annotation: RefManCore.Annotation
+
+    var body: some View {
+        Button {
+            reader.clearClickedAnnotation()
+            reader.delete(annotation)
+        } label: {
+            Label("Remove", systemImage: "trash")
+                .font(.system(size: 12, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help("Remove this annotation")
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
     }
 }
 

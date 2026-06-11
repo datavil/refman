@@ -11,6 +11,7 @@ struct RefManApp: App {
         // Running from `swift run` (no app bundle): become a regular app with a window.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.applicationIconImage = AppIcon.image
     }
 
     private var colorScheme: ColorScheme? {
@@ -24,6 +25,7 @@ struct RefManApp: App {
                 .frame(minWidth: 1000, minHeight: 620)
                 .preferredColorScheme(colorScheme)
         }
+        .defaultSize(width: 1600, height: 1000)
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Import PDFs…") { model.importViaPanel() }
