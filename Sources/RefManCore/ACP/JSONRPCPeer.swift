@@ -19,6 +19,8 @@ public final class JSONRPCPeer: @unchecked Sendable {
     public var requestHandler: ((_ method: String, _ params: [String: Any]) async throws -> Any)?
     /// Handles an incoming notification.
     public var notificationHandler: ((_ method: String, _ params: [String: Any]) -> Void)?
+    /// Called once when the input stream closes.
+    public var onClose: (() -> Void)?
 
     private let input: FileHandle
     private let output: FileHandle
@@ -44,6 +46,7 @@ public final class JSONRPCPeer: @unchecked Sendable {
                 // input closed
             }
             self?.failAllPending(RPCError(code: -32000, message: "connection closed"))
+            self?.onClose?()
         }
     }
 

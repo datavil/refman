@@ -3,7 +3,14 @@
     "allow": [
       "Bash(cat)",
       "Bash(swiftc -o /tmp/icon_preview Sources/RefMan/AppIcon.swift /tmp/icon_preview_main.swift)",
-      "Bash(/tmp/icon_preview)"
+      "Bash(/tmp/icon_preview)",
+      "Read(//tmp/refman-verify/**)",
+      "Read(//private/tmp/refman-verify/**)",
+      "Bash(defaults read *)",
+      "Bash(defaults domains *)",
+      "Read(//private/tmp/**)",
+      "Bash(claude -p 'Use get_current_document and reply with the paper title only.' --model haiku --output-format stream-json --verbose --include-partial-messages --strict-mcp-config --allowedTools mcp__refman --mcp-config '{\"mcpServers\":{\"refman\":{\"command\":\"__TRACKED_VAR__\",\"args\":[\"--mcp\"],\"env\":{\"REFMAN_DB_PATH\":\"__TRACKED_VAR__\",\"REFMAN_DOCUMENT_ID\":\"1\"}}}}')",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

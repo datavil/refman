@@ -26,7 +26,10 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 enum SettingsKeys {
     static let appearance = "appearance"
     static let agentPath = "agentPath"
+    static let llmProvider = "llmProvider"  // "ollama" | "claude"
     static let ollamaModel = "ollamaModel"
+    static let claudeModel = "claudeModel"
+    static let highlightPalette = "highlightPalette"
 }
 
 /// Lists models from a local Ollama for the model picker.
@@ -59,7 +62,9 @@ final class OllamaModelList: ObservableObject {
 struct SettingsView: View {
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
     @AppStorage(SettingsKeys.agentPath) private var agentPath = ""
+    @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
     @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
+    @AppStorage(SettingsKeys.claudeModel) private var claudeModel = ""
 
     @StateObject private var modelList = OllamaModelList()
 
@@ -99,25 +104,51 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
             }
 
-            // Model choice only applies to the bundled Ollama bridge.
+            // Provider and model choice only apply to the bundled agent.
             if agentPath.isEmpty {
-                Section("Ollama Model") {
-                    if modelList.models.isEmpty {
-                        HStack {
-                            TextField(
-                                "Model", text: $ollamaModel,
-                                prompt: Text("largest installed (auto)"))
-                            if modelList.loadFailed {
-                                Image(systemName: "exclamationmark.triangle")
-                                    .foregroundStyle(.orange)
-                                    .help("Could not reach Ollama — is `ollama serve` running?")
-                            }
+                Section("Model Provider") {
+                    Picker("Provider", selection: $llmProvider) {
+                        Text("Local (Ollama)").tag("ollama")
+                        Text("Claude (subscription)").tag("claude")
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if llmProvider == "claude" {
+                    Section("Claude") {
+                        Picker("Model", selection: $claudeModel) {
+                            Text("Default").tag("")
+                            Text("Sonnet").tag("sonnet")
+                            Text("Opus").tag("opus")
+                            Text("Haiku").tag("haiku")
                         }
-                    } else {
-                        Picker("Model", selection: $ollamaModel) {
-                            Text("Largest installed (auto)").tag("")
-                            ForEach(modelList.models, id: \.self) { name in
-                                Text(name).tag(name)
+                        Text(
+                            "Uses the Claude Code CLI signed in with your Claude "
+                                + "subscription — no API key, no per-token billing. Install with "
+                                + "`npm install -g @anthropic-ai/claude-code` and run `claude` once to log in."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section("Ollama Model") {
+                        if modelList.models.isEmpty {
+                            HStack {
+                                TextField(
+                                    "Model", text: $ollamaModel,
+                                    prompt: Text("largest installed (auto)"))
+                                if modelList.loadFailed {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundStyle(.orange)
+                                        .help("Could not reach Ollama — is `ollama serve` running?")
+                                }
+                            }
+                        } else {
+                            Picker("Model", selection: $ollamaModel) {
+                                Text("Largest installed (auto)").tag("")
+                                ForEach(modelList.models, id: \.self) { name in
+                                    Text(name).tag(name)
+                                }
                             }
                         }
                     }

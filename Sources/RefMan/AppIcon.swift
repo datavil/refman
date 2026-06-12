@@ -1,7 +1,7 @@
 import AppKit
 
 /// Vector app icon, drawn at render time so it stays sharp at any size:
-/// a serif "R" monogram over a yellow highlight stroke on deep indigo.
+/// a black Optima "R" monogram over a yellow highlight stroke on white.
 enum AppIcon {
     static var image: NSImage {
         NSImage(size: NSSize(width: 1024, height: 1024), flipped: false) { _ in
@@ -15,10 +15,8 @@ enum AppIcon {
         let bg = NSBezierPath(
             roundedRect: NSRect(x: 100, y: 100, width: 824, height: 824),
             xRadius: 184, yRadius: 184)
-        NSGradient(
-            starting: NSColor(srgbRed: 0.29, green: 0.25, blue: 0.66, alpha: 1),
-            ending: NSColor(srgbRed: 0.15, green: 0.12, blue: 0.36, alpha: 1)
-        )?.draw(in: bg, angle: -70)
+        NSColor.white.setFill()
+        bg.fill()
 
         // Highlight stroke under the monogram.
         let bar = NSBezierPath(
@@ -27,14 +25,12 @@ enum AppIcon {
         NSColor(srgbRed: 1, green: 0.81, blue: 0.20, alpha: 1).setFill()
         bar.fill()
 
-        // Serif "R".
-        let descriptor = NSFont.systemFont(ofSize: 560, weight: .medium)
-            .fontDescriptor.withDesign(.serif)
-        let font = descriptor.flatMap { NSFont(descriptor: $0, size: 560) }
-            ?? NSFont(name: "Georgia", size: 560)!
+        // "R" in Optima: humanist, gently flared strokes.
+        let font = NSFont(name: "Optima-Bold", size: 560)
+            ?? NSFont.systemFont(ofSize: 560, weight: .bold)
         let monogram = NSAttributedString(
             string: "R",
-            attributes: [.font: font, .foregroundColor: NSColor.white])
+            attributes: [.font: font, .foregroundColor: NSColor.black])
         let size = monogram.size()
         monogram.draw(at: NSPoint(x: 512 - size.width / 2, y: 236))
     }

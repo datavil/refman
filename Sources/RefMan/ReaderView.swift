@@ -10,10 +10,17 @@ struct ReaderView: View {
     @StateObject private var reader = ReaderModel()
     @State private var showAnnotations = true
     @State private var showAssistant = false
-    @State private var pendingQuestion: String?
+    @State private var pendingQuote: String?
+    @State private var pendingAction: AssistantAction?
+    @AppStorage(SettingsKeys.highlightPalette)
+    private var highlightPalette = AnnotationOptions.defaultPalette
 
     var body: some View {
         HSplitView {
+            if showAnnotations {
+                AnnotationSidebar(reader: reader)
+                    .frame(width: 320)
+            }
             ZStack(alignment: .topLeading) {
                 PDFKitView(reader: reader)
                 if let rect = reader.selectionRect {
@@ -30,58 +37,46 @@ struct ReaderView: View {
                 }
             }
             .frame(minWidth: 500)
-            if showAnnotations {
-                AnnotationSidebar(reader: reader)
-                    .frame(width: 364)
-            }
             if showAssistant {
-                AssistantPanel(documentId: documentId, pendingQuestion: $pendingQuestion)
-                    .frame(width: 320)
+                AssistantPanel(
+                    documentId: documentId,
+                    pendingQuote: $pendingQuote,
+                    pendingAction: $pendingAction
+                )
+                .frame(width: 340)
             }
-        }
-        // The two sidebars are mutually exclusive.
-        .onChange(of: showAssistant) {
-            if showAssistant { showAnnotations = false }
-        }
-        .onChange(of: showAnnotations) {
-            if showAnnotations { showAssistant = false }
         }
         .onChange(of: reader.askAIRequest) {
             guard let text = reader.askAIRequest else { return }
             reader.askAIRequest = nil
-            pendingQuestion = "Regarding this passage from the paper:\n\n“\(text)”\n\n"
+            pendingQuote = text
+            showAssistant = true
+        }
+        .onChange(of: reader.aiActionRequest?.id) {
+            guard let action = reader.aiActionRequest else { return }
+            reader.aiActionRequest = nil
+            pendingAction = action
             showAssistant = true
         }
         .navigationTitle(reader.title)
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Toggle(isOn: $showAnnotations) {
+                    Label("Annotations", systemImage: "sidebar.left")
+                }
+            }
             ToolbarItemGroup {
-                Button {
-                    reader.addHighlight(color: .yellow)
+                Menu {
+                    ForEach(AnnotationOptions.colors, id: \.hex) { entry in
+                        Toggle(entry.name, isOn: paletteToggle(entry.hex))
+                    }
                 } label: {
-                    Label("Highlight", systemImage: "highlighter")
+                    Label("Tooltip Colors", systemImage: "highlighter")
                 }
-                .help("Highlight selection")
-                .disabled(!reader.hasSelection)
-
-                Button {
-                    reader.addUnderline()
-                } label: {
-                    Label("Underline", systemImage: "underline")
-                }
-                .disabled(!reader.hasSelection)
-
-                Button {
-                    reader.addNoteToSelection()
-                } label: {
-                    Label("Note", systemImage: "note.text.badge.plus")
-                }
-                .disabled(!reader.hasSelection)
+                .help("Choose which colors the highlight and underline tooltip offers")
 
                 Spacer()
 
-                Toggle(isOn: $showAnnotations) {
-                    Label("Annotations", systemImage: "sidebar.right")
-                }
                 Toggle(isOn: $showAssistant) {
                     Label("Assistant", systemImage: "sparkles")
                 }
@@ -90,7 +85,38 @@ struct ReaderView: View {
         .onAppear {
             reader.load(documentId: documentId, model: model)
         }
+        .onDisappear {
+            reader.flushSave()
+        }
     }
+
+    /// Whether a color is part of the highlight tooltip palette; never lets
+    /// the last color be removed.
+    private func paletteToggle(_ hex: String) -> Binding<Bool> {
+        Binding(
+            get: { highlightPalette.contains(hex) },
+            set: { include in
+                var hexes = Set(highlightPalette.split(separator: ",").map(String.init))
+                if include { hexes.insert(hex) } else { hexes.remove(hex) }
+                let ordered = AnnotationOptions.colors.map(\.hex).filter(hexes.contains)
+                if !ordered.isEmpty {
+                    highlightPalette = ordered.joined(separator: ",")
+                }
+            })
+    }
+}
+
+/// Colors offered for annotation tools, persisted as hex strings.
+enum AnnotationOptions {
+    static let colors: [(name: String, hex: String)] = [
+        ("Yellow", "#FFCC00"),
+        ("Green", "#34C759"),
+        ("Pink", "#FF2D55"),
+        ("Blue", "#007AFF"),
+        ("Orange", "#FF9500"),
+        ("Purple", "#AF52DE"),
+    ]
+    static let defaultPalette = "#FFCC00,#34C759,#FF2D55,#007AFF"
 }
 
 /// Owns the PDFDocument, mirrors annotations to the repository, persists the PDF.
@@ -104,16 +130,24 @@ final class ReaderModel: ObservableObject {
     @Published var selectionRect: CGRect?
     /// Set when the user hits “Ask AI” on a selection.
     @Published var askAIRequest: String?
+    /// Set when a sidebar note triggers a built-in AI action (summarize/explain).
+    @Published var aiActionRequest: AssistantAction?
     /// Annotation the user clicked in the PDF, with its view-space rect,
     /// for the floating remove button.
     @Published var clickedAnnotation: RefManCore.Annotation?
     @Published var clickedAnnotationRect: CGRect?
+    /// Index of the page currently in view, for the sidebar's follow-page mode.
+    @Published var currentPageIndex = 0
 
     private(set) var pdfDocument: PDFDocument?
     private var fileURL: URL?
     private var documentId: Int64?
     private var model: AppModel?
     weak var pdfView: PDFView?
+
+    /// Serializes the (expensive) full-PDF writes off the main thread.
+    private static let saveQueue = DispatchQueue(label: "com.refman.pdfsave", qos: .utility)
+    private var pendingSave: DispatchWorkItem?
 
     /// PDFKit drops the standard `.name` (/NM) key when writing the file,
     /// so annotations are tagged with a custom key that does survive a round trip.
@@ -144,6 +178,22 @@ final class ReaderModel: ObservableObject {
             selectionRect = currentSelectionViewRect()
         }
         clearClickedAnnotation()
+        updateCurrentPage()
+    }
+
+    /// Track which page is in view so the sidebar can follow along.
+    func pageChanged() {
+        updateCurrentPage()
+    }
+
+    private func updateCurrentPage() {
+        guard let view = pdfView, let doc = pdfDocument else { return }
+        // PDFKit updates `currentPage` lazily while scrolling, so locate the
+        // page under the viewport center instead.
+        let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        guard let page = view.page(for: center, nearest: true) else { return }
+        let idx = doc.index(for: page)
+        if idx != currentPageIndex { currentPageIndex = idx }
     }
 
     // MARK: - Clicking annotations in the PDF
@@ -201,37 +251,8 @@ final class ReaderModel: ObservableObject {
         addMarkup(kind: .highlight, subtype: .highlight, color: color)
     }
 
-    func addUnderline() {
-        addMarkup(kind: .underline, subtype: .underline, color: .systemBlue)
-    }
-
-    func addNoteToSelection() {
-        guard let view = pdfView, let selection = view.currentSelection,
-            let page = selection.pages.first, let doc = pdfDocument,
-            let documentId, let model
-        else { return }
-        let pageIndex = doc.index(for: page)
-        let bounds = selection.bounds(for: page)
-        let uuid = UUID().uuidString
-
-        let noteBounds = CGRect(
-            x: bounds.maxX + 4, y: bounds.midY - 10, width: 20, height: 20)
-        let pdfAnnotation = PDFAnnotation(
-            bounds: noteBounds, forType: .text, withProperties: nil)
-        pdfAnnotation.color = .systemOrange
-        pdfAnnotation.contents = ""
-        pdfAnnotation.setValue(uuid as NSString, forAnnotationKey: Self.uuidKey)
-        page.addAnnotation(pdfAnnotation)
-
-        let record = RefManCore.Annotation(
-            uuid: uuid, documentId: documentId, pageIndex: pageIndex,
-            kind: .note, colorHex: "#FF9500",
-            selectedText: selection.string, noteText: "")
-        if let saved = try? model.repository.insert(record) {
-            annotations.append(saved)
-            annotations.sort { ($0.pageIndex, $0.createdAt) < ($1.pageIndex, $1.createdAt) }
-        }
-        savePDF()
+    func addUnderline(color: NSColor) {
+        addMarkup(kind: .underline, subtype: .underline, color: color)
     }
 
     private func addMarkup(kind: AnnotationKind, subtype: PDFAnnotationSubtype, color: NSColor) {
@@ -315,6 +336,19 @@ final class ReaderModel: ObservableObject {
         annotations = (try? model.repository.annotations(documentId: documentId)) ?? annotations
     }
 
+    /// Delete via the PDF annotation (context-menu removal in the viewer).
+    func removeMarkup(_ pdfAnn: PDFAnnotation, on page: PDFPage) {
+        guard let doc = pdfDocument else { return }
+        let pageIndex = doc.index(for: page)
+        guard
+            let record = annotations.first(where: {
+                $0.pageIndex == pageIndex && pdfAnnotation(for: $0, on: page) === pdfAnn
+            })
+        else { return }
+        clearClickedAnnotation()
+        delete(record)
+    }
+
     func delete(_ annotation: RefManCore.Annotation) {
         guard let model else { return }
         if let doc = pdfDocument, let page = doc.page(at: annotation.pageIndex),
@@ -359,9 +393,26 @@ final class ReaderModel: ObservableObject {
         }
     }
 
+    /// Writes the PDF off the main thread, coalescing edits made in quick
+    /// succession into a single write.
     private func savePDF() {
         guard let doc = pdfDocument, let url = fileURL else { return }
-        doc.write(to: url)
+        pendingSave?.cancel()
+        // The debounce keeps the document idle while the background write runs.
+        nonisolated(unsafe) let writeDoc = doc
+        let work = DispatchWorkItem { writeDoc.write(to: url) }
+        pendingSave = work
+        Self.saveQueue.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    /// Flush any pending write immediately (e.g. when closing the reader).
+    func flushSave() {
+        guard let work = pendingSave, !work.isCancelled else { return }
+        pendingSave = nil
+        work.cancel()
+        guard let doc = pdfDocument, let url = fileURL else { return }
+        nonisolated(unsafe) let writeDoc = doc
+        Self.saveQueue.async { writeDoc.write(to: url) }
     }
 }
 
@@ -369,6 +420,39 @@ final class ReaderModel: ObservableObject {
 final class MarkupClickPDFView: PDFView {
     var onMarkupClick: ((PDFAnnotation, PDFPage) -> Void)?
     var onEmptyClick: (() -> Void)?
+    var onMarkupRemove: ((PDFAnnotation, PDFPage) -> Void)?
+
+    private var menuMarkup: (annotation: PDFAnnotation, page: PDFPage)?
+
+    /// PDFKit's built-in "Remove Highlight" deletes the annotation from the
+    /// page only, bypassing the database, so the markup reappears on reload.
+    /// Replace the menu with a removal that goes through the model.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        if let page = page(for: point, nearest: false) {
+            let pagePoint = convert(point, to: page)
+            if let ann = page.annotations.first(where: {
+                ($0.type == "Highlight" || $0.type == "Underline")
+                    && $0.bounds.contains(pagePoint)
+            }) {
+                menuMarkup = (ann, page)
+                let menu = NSMenu()
+                let title = ann.type == "Underline" ? "Remove Underline" : "Remove Highlight"
+                let item = NSMenuItem(
+                    title: title, action: #selector(removeMarkup), keyEquivalent: "")
+                item.target = self
+                menu.addItem(item)
+                return menu
+            }
+        }
+        return super.menu(for: event)
+    }
+
+    @objc private func removeMarkup() {
+        guard let (annotation, page) = menuMarkup else { return }
+        menuMarkup = nil
+        onMarkupRemove?(annotation, page)
+    }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -405,6 +489,9 @@ struct PDFKitView: NSViewRepresentable {
         view.onEmptyClick = { [weak reader] in
             reader?.clearClickedAnnotation()
         }
+        view.onMarkupRemove = { [weak reader] annotation, page in
+            reader?.removeMarkup(annotation, on: page)
+        }
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.document = reader.pdfDocument
@@ -425,6 +512,10 @@ struct PDFKitView: NSViewRepresentable {
             context.coordinator,
             selector: #selector(Coordinator.geometryChanged),
             name: .PDFViewScaleChanged, object: view)
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.pageChanged),
+            name: .PDFViewPageChanged, object: view)
         return view
     }
 
@@ -450,6 +541,10 @@ struct PDFKitView: NSViewRepresentable {
         @objc func geometryChanged() {
             reader.viewGeometryChanged()
         }
+
+        @objc func pageChanged() {
+            reader.pageChanged()
+        }
     }
 }
 
@@ -457,17 +552,21 @@ struct PDFKitView: NSViewRepresentable {
 /// highlight colors, underline, note, and Ask AI.
 struct SelectionPen: View {
     @ObservedObject var reader: ReaderModel
+    @AppStorage(SettingsKeys.highlightPalette)
+    private var highlightPalette = AnnotationOptions.defaultPalette
 
-    private static let highlightColors: [(name: String, color: NSColor)] = [
-        ("Yellow", .systemYellow),
-        ("Green", .systemGreen),
-        ("Pink", .systemPink),
-        ("Blue", .systemBlue),
-    ]
+    private var highlightColors: [(name: String, color: NSColor)] {
+        highlightPalette.split(separator: ",").compactMap { hex in
+            guard let entry = AnnotationOptions.colors.first(where: { $0.hex == hex }),
+                let color = NSColor(hex: String(hex))
+            else { return nil }
+            return (entry.name, color)
+        }
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            ForEach(Self.highlightColors, id: \.name) { entry in
+            ForEach(highlightColors, id: \.name) { entry in
                 Button {
                     reader.addHighlight(color: entry.color)
                 } label: {
@@ -481,25 +580,24 @@ struct SelectionPen: View {
 
             separator
 
-            Button {
-                reader.addUnderline()
-            } label: {
-                Image(systemName: "underline")
-                    .font(.system(size: 12, weight: .medium))
+            ForEach(highlightColors, id: \.name) { entry in
+                Button {
+                    reader.addUnderline(color: entry.color)
+                } label: {
+                    VStack(spacing: 1.5) {
+                        Text("U")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(Color(nsColor: entry.color))
+                            .frame(width: 13, height: 3.5)
+                    }
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Underline \(entry.name.lowercased())")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Underline")
-
-            Button {
-                reader.addNoteToSelection()
-            } label: {
-                Image(systemName: "note.text.badge.plus")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Add note")
 
             separator
 
@@ -555,16 +653,102 @@ struct AnnotationBubble: View {
 /// Lists annotations; click to jump, edit note text inline.
 struct AnnotationSidebar: View {
     @ObservedObject var reader: ReaderModel
+    @State private var followPage = false
+    /// Color hexes to show; empty means no filter.
+    @State private var colorFilter: Set<String> = []
+
+    /// Distinct annotation colors, in first-seen order.
+    private var presentColors: [String] {
+        var seen = Set<String>()
+        return reader.annotations.compactMap {
+            seen.insert($0.colorHex).inserted ? $0.colorHex : nil
+        }
+    }
+
+    private var filteredAnnotations: [RefManCore.Annotation] {
+        colorFilter.isEmpty
+            ? reader.annotations
+            : reader.annotations.filter { colorFilter.contains($0.colorHex) }
+    }
 
     var body: some View {
-        List {
-            Section("Annotations (\(reader.annotations.count))") {
-                ForEach(reader.annotations, id: \.uuid) { annotation in
-                    AnnotationRow(reader: reader, annotation: annotation)
+        VStack(spacing: 0) {
+            HStack {
+                Text("Annotations (\(filteredAnnotations.count))")
+                    .font(.headline)
+                Spacer()
+                Toggle(isOn: $followPage) {
+                    Label("Follow page", systemImage: "arrow.down.doc")
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help("Scroll the list to keep the current page's annotations in view")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            if presentColors.count > 1 {
+                HStack(spacing: 8) {
+                    ForEach(presentColors, id: \.self) { hex in
+                        Button {
+                            if colorFilter.contains(hex) {
+                                colorFilter.remove(hex)
+                            } else {
+                                colorFilter.insert(hex)
+                            }
+                        } label: {
+                            Circle()
+                                .fill(Color(nsColor: NSColor(hex: hex) ?? .systemYellow))
+                                .frame(width: 14, height: 14)
+                                .opacity(
+                                    colorFilter.isEmpty || colorFilter.contains(hex) ? 1 : 0.25)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Show only this color")
+                    }
+                    Spacer()
+                    if !colorFilter.isEmpty {
+                        Button("All") { colorFilter.removeAll() }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            }
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(filteredAnnotations, id: \.uuid) { annotation in
+                            AnnotationRow(reader: reader, annotation: annotation)
+                                .id(annotation.uuid)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                            Divider()
+                        }
+                    }
+                }
+                .onChange(of: reader.currentPageIndex) { scrollToCurrentPage(proxy) }
+                .onChange(of: followPage) {
+                    if followPage { scrollToCurrentPage(proxy) }
                 }
             }
         }
-        .listStyle(.inset)
+    }
+
+    /// In follow-page mode, bring the first annotation on (or after) the
+    /// visible page to the top of the list.
+    private func scrollToCurrentPage(_ proxy: ScrollViewProxy) {
+        guard followPage,
+            let target = filteredAnnotations.first(where: {
+                $0.pageIndex >= reader.currentPageIndex
+            })
+        else { return }
+        // Defer past the current layout pass so the proxy can find the row.
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo(target.uuid, anchor: .top) }
+        }
     }
 }
 
@@ -572,11 +756,14 @@ struct AnnotationRow: View {
     @ObservedObject var reader: ReaderModel
     let annotation: RefManCore.Annotation
     @State private var noteText: String
+    @State private var editingNote: Bool
 
     init(reader: ReaderModel, annotation: RefManCore.Annotation) {
         self.reader = reader
         self.annotation = annotation
-        _noteText = State(initialValue: annotation.noteText ?? "")
+        let note = annotation.noteText ?? ""
+        _noteText = State(initialValue: note)
+        _editingNote = State(initialValue: !note.isEmpty)
     }
 
     var body: some View {
@@ -605,11 +792,29 @@ struct AnnotationRow: View {
                     .overlay(alignment: .leading) {
                         Rectangle().fill(.quaternary).frame(width: 2)
                     }
+                HStack(spacing: 12) {
+                    Button("Summarize") { reader.aiActionRequest = AssistantPrompts.summarize(text) }
+                    Button("Explain") { reader.aiActionRequest = AssistantPrompts.explain(text) }
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .font(.caption)
+                .foregroundStyle(.purple)
             }
-            if annotation.kind == .note {
+            if editingNote {
                 TextField("Note…", text: $noteText, axis: .vertical)
                     .font(.callout)
                     .onSubmit { reader.setNote(noteText, for: annotation) }
+            } else {
+                Button {
+                    editingNote = true
+                } label: {
+                    Label("Add note", systemImage: "note.text.badge.plus")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)

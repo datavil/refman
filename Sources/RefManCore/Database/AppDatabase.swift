@@ -20,6 +20,19 @@ public final class AppDatabase: Sendable {
         return try AppDatabase(dbQueue)
     }
 
+    /// Opens the database from a second process (refman-agent's MCP server):
+    /// waits briefly on locks held by the app instead of failing immediately.
+    public static func openShared(at url: URL) throws -> AppDatabase {
+        var config = Configuration()
+        config.busyMode = .timeout(2.0)
+        return try AppDatabase(DatabaseQueue(path: url.path, configuration: config))
+    }
+
+    /// Filesystem path of the database, if file-backed.
+    public var path: String? {
+        (dbWriter as? DatabaseQueue)?.path
+    }
+
     /// An in-memory database, for tests and previews.
     public static func inMemory() throws -> AppDatabase {
         try AppDatabase(DatabaseQueue())

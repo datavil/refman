@@ -9,6 +9,73 @@ struct ChatMessage: Identifiable, Equatable {
     var text: String
 }
 
+/// A one-tap assistant action: a short user-facing `label` and the full
+/// instruction (`prompt`) that is sent to the model but kept out of sight.
+struct AssistantAction: Identifiable, Equatable {
+    let id = UUID()
+    let label: String
+    let prompt: String
+}
+
+/// Built-in prompts behind the quick-action buttons.
+enum AssistantPrompts {
+    /// Document-level queries shown as chips in the assistant panel.
+    static let document: [AssistantAction] = [
+        AssistantAction(
+            label: "Summarize",
+            prompt: """
+                Summarize the currently open paper using its full text. Cover the problem it \
+                addresses, the approach taken, and the main findings in 2–4 short paragraphs. \
+                Be concise and avoid filler.
+                """),
+        AssistantAction(
+            label: "Key points",
+            prompt: """
+                List the key points and main contributions of the currently open paper as 5–8 \
+                concise bullet points, based on its full text.
+                """),
+        AssistantAction(
+            label: "Methods",
+            prompt: """
+                Explain the methods and experimental setup of the currently open paper, based \
+                on its full text. Be specific and concise.
+                """),
+        AssistantAction(
+            label: "Limitations",
+            prompt: """
+                Identify the main limitations, assumptions, and open questions of the currently \
+                open paper, based on its full text. Be concise.
+                """),
+    ]
+
+    static func summarize(_ passage: String) -> AssistantAction {
+        AssistantAction(
+            label: "Summarize: \(snippet(passage))",
+            prompt: """
+                Summarize the following passage from the currently open paper in 1–3 sentences, \
+                preserving its key meaning:
+
+                “\(passage)”
+                """)
+    }
+
+    static func explain(_ passage: String) -> AssistantAction {
+        AssistantAction(
+            label: "Explain: \(snippet(passage))",
+            prompt: """
+                Explain the following passage from the currently open paper in clear, simple \
+                terms. Define any jargon and add brief context from the paper where helpful:
+
+                “\(passage)”
+                """)
+    }
+
+    private static func snippet(_ text: String) -> String {
+        let flat = text.replacingOccurrences(of: "\n", with: " ")
+        return flat.count > 70 ? String(flat.prefix(70)) + "…" : flat
+    }
+}
+
 /// Drives one ACP session against refman-agent, exposing library tools.
 @MainActor
 final class AssistantModel: ObservableObject {
@@ -17,6 +84,8 @@ final class AssistantModel: ObservableObject {
     @Published var isBusy = false
     @Published var started = false
 
+    /// A built-in action waiting for the agent to become ready.
+    private var queued: AssistantAction?
     private var client: ACPClient?
     private let documentId: Int64
     private let repository: LibraryRepository
@@ -38,19 +107,34 @@ final class AssistantModel: ObservableObject {
             .appendingPathComponent("refman-agent")
     }
 
-    /// Model override for the bundled Ollama bridge, from Settings.
+    /// Provider and model overrides for the bundled agent, from Settings.
     private static var agentEnvironment: [String: String] {
-        let model = UserDefaults.standard.string(forKey: SettingsKeys.ollamaModel) ?? ""
-        return model.isEmpty ? [:] : ["REFMAN_OLLAMA_MODEL": model]
+        let defaults = UserDefaults.standard
+        let provider = defaults.string(forKey: SettingsKeys.llmProvider) ?? "ollama"
+        var environment = ["REFMAN_BACKEND": provider]
+        if provider == "claude" {
+            let model = defaults.string(forKey: SettingsKeys.claudeModel) ?? ""
+            if !model.isEmpty { environment["REFMAN_CLAUDE_MODEL"] = model }
+        } else {
+            let model = defaults.string(forKey: SettingsKeys.ollamaModel) ?? ""
+            if !model.isEmpty { environment["REFMAN_OLLAMA_MODEL"] = model }
+        }
+        return environment
     }
 
     func startIfNeeded() {
         guard client == nil else { return }
         let repository = self.repository
         let documentId = self.documentId
+        // The Claude backend's MCP server opens the library directly.
+        var environment = Self.agentEnvironment
+        environment["REFMAN_DOCUMENT_ID"] = String(documentId)
+        if let dbPath = repository.database.path {
+            environment["REFMAN_DB_PATH"] = dbPath
+        }
         let client = ACPClient(
             agentURL: Self.agentURL,
-            environment: Self.agentEnvironment
+            environment: environment
         ) { name, arguments in
             try await Self.handleTool(
                 name: name, arguments: arguments,
@@ -68,28 +152,51 @@ final class AssistantModel: ObservableObject {
                         text: "Hi! Ask me about this paper or your library. I can search, read full text, and see your annotations."
                     ))
             } catch {
+                let provider = UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) ?? "ollama"
+                let hint = provider == "claude"
+                    ? "Make sure the Claude Code CLI is installed and logged in (run `claude` in Terminal)."
+                    : "Make sure Ollama is running (`ollama serve`) and a model is pulled (`ollama pull llama3.2`)."
                 messages.append(
                     ChatMessage(
                         role: .error,
-                        text: "Could not start agent: \(error.localizedDescription)\n\nMake sure Ollama is running (`ollama serve`) and a model is pulled (`ollama pull llama3.2`)."
+                        text: "Could not start agent: \(error.localizedDescription)\n\n\(hint)"
                     ))
             }
             isBusy = false
+            flushQueue()
         }
     }
 
     func send() {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let client, !isBusy else { return }
+        guard !text.isEmpty, client != nil, !isBusy else { return }
         input = ""
-        messages.append(ChatMessage(role: .user, text: text))
+        submit(display: text, prompt: text)
+    }
+
+    /// Runs a built-in action, queueing it until the agent is ready.
+    func enqueue(_ action: AssistantAction) {
+        queued = action
+        flushQueue()
+    }
+
+    private func flushQueue() {
+        guard let action = queued, started, client != nil, !isBusy else { return }
+        queued = nil
+        submit(display: action.label, prompt: action.prompt)
+    }
+
+    /// Posts `display` as the outgoing message while sending `prompt` to the agent.
+    private func submit(display: String, prompt: String) {
+        guard let client, !isBusy else { return }
+        messages.append(ChatMessage(role: .user, text: display))
         messages.append(ChatMessage(role: .assistant, text: ""))
         let index = messages.count - 1
         isBusy = true
 
         Task {
             do {
-                try await client.prompt(text) { chunk in
+                try await client.prompt(prompt) { chunk in
                     Task { @MainActor in
                         self.messages[index].text += chunk
                     }
@@ -99,6 +206,7 @@ final class AssistantModel: ObservableObject {
                 messages[index].text = "Error: \(error.localizedDescription)"
             }
             isBusy = false
+            flushQueue()
         }
     }
 
@@ -113,78 +221,33 @@ final class AssistantModel: ObservableObject {
         name: String, arguments: [String: Any],
         repository: LibraryRepository, currentDocumentId: Int64
     ) async throws -> String {
-        func targetId() -> Int64 {
-            (arguments["document_id"] as? NSNumber)?.int64Value ?? currentDocumentId
-        }
-
-        switch name {
-        case "get_current_document":
-            guard let details = try repository.document(id: currentDocumentId) else {
-                return "No document is open."
-            }
-            return describe(details)
-
-        case "get_document_text":
-            let id = targetId()
-            guard let text = try repository.fullText(documentId: id), !text.isEmpty else {
-                return "No extracted text for document \(id)."
-            }
-            // Keep context manageable for small local models.
-            return String(text.prefix(24_000))
-
-        case "search_library":
-            let query = arguments["query"] as? String ?? ""
-            let results = try repository.search(query)
-            guard !results.isEmpty else { return "No matches for ‘\(query)’." }
-            return results.prefix(10).map(describe).joined(separator: "\n---\n")
-
-        case "get_annotations":
-            let id = targetId()
-            let annotations = try repository.annotations(documentId: id)
-            guard !annotations.isEmpty else { return "No annotations on document \(id)." }
-            return annotations.map { a in
-                var line = "p.\(a.pageIndex + 1) [\(a.kind.rawValue)]"
-                if let t = a.selectedText, !t.isEmpty { line += " “\(t)”" }
-                if let n = a.noteText, !n.isEmpty { line += " — note: \(n)" }
-                return line
-            }.joined(separator: "\n")
-
-        case "add_tag":
-            guard let tagName = arguments["name"] as? String, !tagName.isEmpty else {
-                return "Missing tag name."
-            }
-            let id = targetId()
-            _ = try repository.addTag(tagName, toDocument: id)
-            return "Tagged document \(id) with ‘\(tagName)’."
-
-        default:
-            return "Unknown tool: \(name)"
-        }
-    }
-
-    nonisolated private static func describe(_ details: DocumentDetails) -> String {
-        let d = details.document
-        var lines = ["id: \(d.id ?? -1)", "title: \(d.title)"]
-        if !details.authorsText.isEmpty { lines.append("authors: \(details.authorsText)") }
-        if let year = d.year { lines.append("year: \(year)") }
-        if let venue = d.venue { lines.append("venue: \(venue)") }
-        if let doi = d.doi { lines.append("doi: \(doi)") }
-        if let abstract = d.abstract { lines.append("abstract: \(abstract.prefix(600))") }
-        return lines.joined(separator: "\n")
+        // Keep context manageable for small local models.
+        try LibraryTools.handle(
+            name: name, arguments: arguments,
+            repository: repository, currentDocumentId: currentDocumentId,
+            textLimit: 24_000)
     }
 }
 
 struct AssistantPanel: View {
     @EnvironmentObject var model: AppModel
     let documentId: Int64
-    /// Pre-fills the input (e.g. “Ask AI” on a PDF selection); consumed once.
-    @Binding var pendingQuestion: String?
+    /// Passage quoted via “Ask AI” on a PDF selection; shown above the input
+    /// and prepended to the next message.
+    @Binding var pendingQuote: String?
+    /// Built-in action triggered from a note in the sidebar; auto-sent on arrival.
+    @Binding var pendingAction: AssistantAction?
 
     @StateObject private var assistant: AssistantModelBox = AssistantModelBox()
 
-    init(documentId: Int64, pendingQuestion: Binding<String?> = .constant(nil)) {
+    init(
+        documentId: Int64,
+        pendingQuote: Binding<String?> = .constant(nil),
+        pendingAction: Binding<AssistantAction?> = .constant(nil)
+    ) {
         self.documentId = documentId
-        self._pendingQuestion = pendingQuestion
+        self._pendingQuote = pendingQuote
+        self._pendingAction = pendingAction
     }
 
     var body: some View {
@@ -206,21 +269,58 @@ struct AssistantPanel: View {
                 }
             }
             Divider()
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(AssistantPrompts.document) { action in
+                        Button(action.label) {
+                            assistant.model?.enqueue(action)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+            }
+            .disabled(assistant.model?.isBusy ?? true)
+            if let quote = pendingQuote {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "text.quote")
+                        .foregroundStyle(.secondary)
+                    Text(quote)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                    Spacer()
+                    Button {
+                        pendingQuote = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tertiary)
+                    .help("Remove quote")
+                }
+                .padding(8)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+            }
             HStack {
                 TextField(
-                    "Ask about this paper…",
+                    pendingQuote == nil ? "Ask about this paper…" : "Ask about this passage…",
                     text: Binding(
                         get: { assistant.model?.input ?? "" },
                         set: { assistant.model?.input = $0 }
                     )
                 )
                 .textFieldStyle(.roundedBorder)
-                .onSubmit { assistant.model?.send() }
+                .onSubmit { sendMessage() }
                 if assistant.model?.isBusy == true {
                     ProgressView().controlSize(.small)
                 } else {
                     Button {
-                        assistant.model?.send()
+                        sendMessage()
                     } label: {
                         Image(systemName: "arrow.up.circle.fill")
                     }
@@ -236,18 +336,34 @@ struct AssistantPanel: View {
                 assistant.bind()
             }
             assistant.model?.startIfNeeded()
-            consumePendingQuestion()
+            consumePendingAction()
         }
-        .onChange(of: pendingQuestion) { consumePendingQuestion() }
+        .onChange(of: pendingAction?.id) {
+            consumePendingAction()
+        }
         .onDisappear {
             assistant.model?.shutdown()
         }
     }
 
-    private func consumePendingQuestion() {
-        guard let question = pendingQuestion, let assistantModel = assistant.model else { return }
-        assistantModel.input = question
-        pendingQuestion = nil
+    /// Hands a sidebar-triggered action to the model, then clears it.
+    private func consumePendingAction() {
+        guard let action = pendingAction, let model = assistant.model else { return }
+        pendingAction = nil
+        model.enqueue(action)
+    }
+
+    /// Folds the quoted passage (if any) into the outgoing message.
+    private func sendMessage() {
+        guard let assistantModel = assistant.model, !assistantModel.isBusy else { return }
+        if let quote = pendingQuote {
+            let typed = assistantModel.input.trimmingCharacters(in: .whitespacesAndNewlines)
+            let ask = typed.isEmpty ? "Explain this passage." : typed
+            assistantModel.input =
+                "In the currently open paper, regarding this passage:\n\n“\(quote)”\n\n\(ask)"
+            pendingQuote = nil
+        }
+        assistantModel.send()
     }
 }
 
