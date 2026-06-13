@@ -35,6 +35,14 @@ The bundle includes both the SwiftUI app and the bundled `refman-agent` used by
 the Assistant. The script ad-hoc signs the app for local use; set
 `SKIP_CODESIGN=1` to skip signing.
 
+Because RefMan isn't signed with an Apple Developer ID, macOS Gatekeeper blocks
+it on first launch ("Apple cannot check it for malicious software"). Open it
+once via right-click → **Open**, or clear the quarantine flag:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/RefMan.app
+```
+
 ## Test
 
 ```sh

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: swift test
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app bundle
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}" scripts/build_app.sh
+      - name: Package zip
+        run: |
+          ditto -c -k --keepParent dist/RefMan.app "RefMan-${{ github.ref_name }}.zip"
+      - name: Package dmg
+        run: |
+          mkdir -p dmg-staging
+          cp -R dist/RefMan.app dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "RefMan ${{ github.ref_name }}" \
+            -srcfolder dmg-staging -ov -format UDZO \
+            "RefMan-${{ github.ref_name }}.dmg"
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Install
+
+          Download the `.dmg` (drag RefMan to Applications) or the `.zip`.
+
+          RefMan is not signed with an Apple Developer ID, so on first launch
+          macOS shows **"RefMan can't be opened because Apple cannot check it
+          for malicious software."** To open it:
+
+          - **Right-click** RefMan.app → **Open** → **Open** in the dialog, or
+          - run `xattr -dr com.apple.quarantine /Applications/RefMan.app`
+
+          You only need to do this once.
+          EOF
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            "RefMan-${{ github.ref_name }}.zip" \
+            "RefMan-${{ github.ref_name }}.dmg" \
+            --title "${{ github.ref_name }}" \
+            --notes-file release-notes.md \
+            --generate-notes
