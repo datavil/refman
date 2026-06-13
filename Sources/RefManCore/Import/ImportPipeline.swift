@@ -71,4 +71,22 @@ public struct ImportPipeline: Sendable {
             document, authors: authors, fullText: extracted?.fullText)
         return Result(details: details, wasDuplicate: false, resolvedOnline: resolvedOnline)
     }
+
+    /// Re-resolves an existing document's metadata from its DOI/arXiv ID.
+    /// Returns the updated details, or nil if it has no identifier or resolution failed.
+    public func refreshMetadata(for document: Document) async throws -> DocumentDetails? {
+        var record: MetadataRecord?
+        if let doi = document.doi {
+            record = try? await crossRef.resolve(doi: doi)
+        }
+        if record == nil, let arxivId = document.arxivId {
+            record = try? await arXiv.resolve(arxivId: arxivId)
+        }
+        guard let record else { return nil }
+
+        var updated = document
+        record.apply(to: &updated)
+        let authors = record.authors.isEmpty ? nil : record.authorRecords
+        return try repository.update(updated, authors: authors)
+    }
 }

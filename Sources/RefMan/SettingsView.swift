@@ -81,20 +81,10 @@ struct SettingsView: View {
 
             Section("Assistant Agent") {
                 LabeledContent("Agent") {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(agentPath.isEmpty ? "Bundled refman-agent" : agentPath)
-                            .font(.callout)
-                            .foregroundStyle(agentPath.isEmpty ? .secondary : .primary)
-                            .truncationMode(.middle)
-                            .lineLimit(1)
-                            .frame(maxWidth: 280, alignment: .trailing)
-                        HStack {
-                            Button("Choose…") { chooseAgent() }
-                            if !agentPath.isEmpty {
-                                Button("Use Bundled") { agentPath = "" }
-                            }
-                        }
-                    }
+                    AgentPicker(
+                        stackAlignment: .trailing,
+                        pathAlignment: .trailing,
+                        pathMaxWidth: 280)
                 }
                 Text(
                     "Any executable speaking the Agent Client Protocol on stdio works here. "
@@ -107,11 +97,7 @@ struct SettingsView: View {
             // Provider and model choice only apply to the bundled agent.
             if agentPath.isEmpty {
                 Section("Model Provider") {
-                    Picker("Provider", selection: $llmProvider) {
-                        Text("Local (Ollama)").tag("ollama")
-                        Text("Claude (subscription)").tag("claude")
-                    }
-                    .pickerStyle(.segmented)
+                    AssistantProviderPicker(selection: $llmProvider)
                 }
 
                 if llmProvider == "claude" {
@@ -156,7 +142,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Text("Agent changes apply to newly opened assistant panels.")
+                Text("Agent executable changes apply to newly opened assistant panels.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -165,6 +151,56 @@ struct SettingsView: View {
         .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear { modelList.load() }
+    }
+}
+
+struct AssistantProviderPicker: View {
+    @Binding var selection: String
+
+    var label = "Provider"
+    var compact = false
+
+    var body: some View {
+        Picker(label, selection: $selection) {
+            Text("Local (Ollama)").tag("ollama")
+            Text(compact ? "Claude" : "Claude (subscription)").tag("claude")
+        }
+        .pickerStyle(.segmented)
+    }
+}
+
+struct AgentPicker: View {
+    @AppStorage(SettingsKeys.agentPath) private var agentPath = ""
+
+    var stackAlignment: HorizontalAlignment = .leading
+    var pathAlignment: Alignment = .leading
+    var pathMaxWidth: CGFloat? = nil
+    var controlSize: ControlSize = .regular
+
+    var body: some View {
+        VStack(alignment: stackAlignment, spacing: 4) {
+            Text(agentPath.isEmpty ? "Bundled refman-agent" : agentPath)
+                .font(.callout)
+                .foregroundStyle(agentPath.isEmpty ? .secondary : .primary)
+                .truncationMode(.middle)
+                .lineLimit(1)
+                .frame(maxWidth: pathMaxWidth, alignment: pathAlignment)
+            HStack(spacing: 6) {
+                Button {
+                    chooseAgent()
+                } label: {
+                    Label("Choose…", systemImage: "folder")
+                }
+                if !agentPath.isEmpty {
+                    Button {
+                        agentPath = ""
+                    } label: {
+                        Label("Use Bundled", systemImage: "shippingbox")
+                    }
+                }
+            }
+            .controlSize(controlSize)
+        }
     }
 
     private func chooseAgent() {

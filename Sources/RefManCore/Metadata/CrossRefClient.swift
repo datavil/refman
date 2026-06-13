@@ -54,7 +54,7 @@ public struct CrossRefClient: Sendable {
             abstract: work.abstract.map(Self.stripJATS),
             authors: authors,
             year: year,
-            venue: work.containerTitle?.first,
+            venue: work.containerTitle?.first ?? work.institution?.first?.name,
             volume: work.volume,
             issue: work.issue,
             pages: work.page,
@@ -82,6 +82,7 @@ public struct CrossRefClient: Sendable {
         let abstract: String?
         let author: [WorkAuthor]?
         let containerTitle: [String]?
+        let institution: [Institution]?
         let volume: String?
         let issue: String?
         let page: String?
@@ -90,9 +91,14 @@ public struct CrossRefClient: Sendable {
         let URL: String?
 
         enum CodingKeys: String, CodingKey {
-            case DOI, type, title, abstract, author, volume, issue, page, issued, published, URL
+            case DOI, type, title, abstract, author, institution, volume, issue, page, issued,
+                published, URL
             case containerTitle = "container-title"
         }
+    }
+
+    struct Institution: Decodable {
+        let name: String?
     }
 
     struct WorkAuthor: Decodable {

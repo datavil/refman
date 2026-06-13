@@ -125,6 +125,21 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v2") { db in
+            try db.alter(table: "collection") { t in
+                t.add(column: "icon", .text)
+            }
+        }
+
+        migrator.registerMigration("v3") { db in
+            try db.create(table: "colorLabel") { t in
+                t.belongsTo("document", onDelete: .cascade).notNull()
+                t.column("colorHex", .text).notNull()
+                t.column("label", .text).notNull()
+                t.primaryKey(["documentId", "colorHex"])
+            }
+        }
+
         return migrator
     }
 }

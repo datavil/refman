@@ -152,10 +152,19 @@ final class AssistantModel: ObservableObject {
                         text: "Hi! Ask me about this paper or your library. I can search, read full text, and see your annotations."
                     ))
             } catch {
+                let customAgentPath = UserDefaults.standard.string(forKey: SettingsKeys.agentPath) ?? ""
                 let provider = UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) ?? "ollama"
-                let hint = provider == "claude"
-                    ? "Make sure the Claude Code CLI is installed and logged in (run `claude` in Terminal)."
-                    : "Make sure Ollama is running (`ollama serve`) and a model is pulled (`ollama pull llama3.2`)."
+                let hint: String
+                if !customAgentPath.isEmpty {
+                    hint =
+                        "Choose an executable ACP-compatible agent, or switch back to the bundled refman-agent."
+                } else if provider == "claude" {
+                    hint =
+                        "Make sure the Claude Code CLI is installed and logged in (run `claude` in Terminal)."
+                } else {
+                    hint =
+                        "Make sure Ollama is running (`ollama serve`) and a model is pulled (`ollama pull llama3.2`)."
+                }
                 messages.append(
                     ChatMessage(
                         role: .error,
@@ -239,6 +248,9 @@ struct AssistantPanel: View {
     @Binding var pendingAction: AssistantAction?
 
     @StateObject private var assistant: AssistantModelBox = AssistantModelBox()
+    @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
+    @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
+    @AppStorage(SettingsKeys.claudeModel) private var claudeModel = ""
 
     init(
         documentId: Int64,
@@ -252,6 +264,17 @@ struct AssistantPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("AI", systemImage: "sparkles")
+                    .font(.headline)
+                AssistantProviderPicker(selection: $llmProvider, label: "Agent", compact: true)
+                    .controlSize(.small)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.bar)
+            Divider()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
@@ -341,9 +364,25 @@ struct AssistantPanel: View {
         .onChange(of: pendingAction?.id) {
             consumePendingAction()
         }
+        .onChange(of: llmProvider) {
+            restartAssistant()
+        }
+        .onChange(of: ollamaModel) {
+            restartAssistant()
+        }
+        .onChange(of: claudeModel) {
+            restartAssistant()
+        }
         .onDisappear {
             assistant.model?.shutdown()
         }
+    }
+
+    private func restartAssistant() {
+        assistant.model?.shutdown()
+        assistant.model = AssistantModel(
+            documentId: documentId, repository: model.repository)
+        assistant.model?.startIfNeeded()
     }
 
     /// Hands a sidebar-triggered action to the model, then clears it.

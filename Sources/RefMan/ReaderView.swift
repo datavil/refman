@@ -23,7 +23,7 @@ struct ReaderView: View {
             }
             ZStack(alignment: .topLeading) {
                 PDFKitView(reader: reader)
-                if let rect = reader.selectionRect {
+                if let rect = reader.selectionRect, !reader.highlighterMode {
                     SelectionPen(reader: reader)
                         .position(x: max(rect.midX, 120), y: max(rect.minY - 26, 20))
                         .transition(.opacity)
@@ -66,12 +66,46 @@ struct ReaderView: View {
                 }
             }
             ToolbarItemGroup {
+                HStack(spacing: 7) {
+                    Button {
+                        reader.highlighterMode.toggle()
+                    } label: {
+                        Image(systemName: "highlighter")
+                            .foregroundStyle(
+                                reader.highlighterMode
+                                    ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
+                            .padding(5)
+                            .background(
+                                reader.highlighterMode
+                                    ? Color.accentColor.opacity(0.16) : .clear,
+                                in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Highlighter mode: selecting text highlights it immediately")
+
+                    Menu {
+                        Picker("Color", selection: $reader.highlighterColorHex) {
+                            ForEach(paletteHexes, id: \.self) { hex in
+                                Text(reader.label(forHex: hex)).tag(hex)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Image(nsImage: highlighterSwatch)
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .help("Highlighter color")
+                }
+                .padding(.horizontal, 2)
+
                 Menu {
                     ForEach(AnnotationOptions.colors, id: \.hex) { entry in
                         Toggle(entry.name, isOn: paletteToggle(entry.hex))
                     }
                 } label: {
-                    Label("Tooltip Colors", systemImage: "highlighter")
+                    Label("Tooltip Colors", systemImage: "paintpalette")
                 }
                 .help("Choose which colors the highlight and underline tooltip offers")
 
@@ -88,6 +122,23 @@ struct ReaderView: View {
         .onDisappear {
             reader.flushSave()
         }
+    }
+
+    private var paletteHexes: [String] {
+        highlightPalette.split(separator: ",").map(String.init)
+    }
+
+    /// A color dot drawn as a bitmap: toolbars render symbol images as
+    /// templates and collapse bare shapes, but leave non-template images alone.
+    private var highlighterSwatch: NSImage {
+        let color = NSColor(hex: reader.highlighterColorHex) ?? .systemYellow
+        let image = NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     /// Whether a color is part of the highlight tooltip palette; never lets
@@ -138,6 +189,11 @@ final class ReaderModel: ObservableObject {
     @Published var clickedAnnotationRect: CGRect?
     /// Index of the page currently in view, for the sidebar's follow-page mode.
     @Published var currentPageIndex = 0
+    /// Per-document display names for annotation colors, keyed by hex.
+    @Published var colorLabels: [String: String] = [:]
+    /// When on, finishing a text selection immediately applies a highlight.
+    @Published var highlighterMode = false
+    @Published var highlighterColorHex = AnnotationOptions.colors[0].hex
 
     private(set) var pdfDocument: PDFDocument?
     private var fileURL: URL?
@@ -164,12 +220,54 @@ final class ReaderModel: ObservableObject {
         fileURL = url
         title = details.document.title
         annotations = (try? model.repository.annotations(documentId: documentId)) ?? []
+        colorLabels = (try? model.repository.colorLabels(documentId: documentId)) ?? [:]
+    }
+
+    // MARK: - Color labels
+
+    /// The user's label for a color, falling back to the stock color name.
+    func label(forHex hex: String) -> String {
+        colorLabels[hex] ?? AnnotationOptions.colors.first { $0.hex == hex }?.name ?? hex
+    }
+
+    func setColorLabel(_ label: String, forHex hex: String) {
+        guard let model, let documentId else { return }
+        let trimmed = label.trimmingCharacters(in: .whitespaces)
+        try? model.repository.setColorLabel(documentId: documentId, colorHex: hex, label: trimmed)
+        colorLabels[hex] = trimmed.isEmpty ? nil : trimmed
+    }
+
+    // MARK: - Highlighter mode
+
+    private var autoHighlightTask: Task<Void, Never>?
+
+    /// In highlighter mode the finished selection immediately becomes
+    /// a highlight.
+    private func selectionFinished() {
+        guard highlighterMode,
+            !(pdfView?.currentSelection?.string?.isEmpty ?? true),
+            let color = NSColor(hex: highlighterColorHex)
+        else { return }
+        addHighlight(color: color)
     }
 
     func selectionChanged() {
         hasSelection = !(pdfView?.currentSelection?.string?.isEmpty ?? true)
         selectionRect = currentSelectionViewRect()
         if hasSelection { clearClickedAnnotation() }
+        autoHighlightTask?.cancel()
+        if highlighterMode, hasSelection {
+            autoHighlightTask = Task { [weak self] in
+                // Wait for the mouse to be released so a drag in progress
+                // is not highlighted piecemeal.
+                while NSEvent.pressedMouseButtons & 1 != 0 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    if Task.isCancelled { return }
+                }
+                if Task.isCancelled { return }
+                self?.selectionFinished()
+            }
+        }
     }
 
     /// Re-anchor (or hide) the pen when the document scrolls under a selection.
@@ -557,10 +655,10 @@ struct SelectionPen: View {
 
     private var highlightColors: [(name: String, color: NSColor)] {
         highlightPalette.split(separator: ",").compactMap { hex in
-            guard let entry = AnnotationOptions.colors.first(where: { $0.hex == hex }),
+            guard AnnotationOptions.colors.contains(where: { $0.hex == hex }),
                 let color = NSColor(hex: String(hex))
             else { return nil }
-            return (entry.name, color)
+            return (reader.label(forHex: String(hex)), color)
         }
     }
 
@@ -575,7 +673,7 @@ struct SelectionPen: View {
                         .frame(width: 13, height: 13)
                 }
                 .buttonStyle(.plain)
-                .help("Highlight \(entry.name.lowercased())")
+                .help("Highlight: \(entry.name)")
             }
 
             separator
@@ -596,7 +694,7 @@ struct SelectionPen: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Underline \(entry.name.lowercased())")
+                .help("Underline: \(entry.name)")
             }
 
             separator
@@ -656,6 +754,9 @@ struct AnnotationSidebar: View {
     @State private var followPage = false
     /// Color hexes to show; empty means no filter.
     @State private var colorFilter: Set<String> = []
+    /// Color being labeled via the chip context menu.
+    @State private var labelingHex: String?
+    @State private var labelText = ""
 
     /// Distinct annotation colors, in first-seen order.
     private var presentColors: [String] {
@@ -686,7 +787,7 @@ struct AnnotationSidebar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            if presentColors.count > 1 {
+            if !presentColors.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(presentColors, id: \.self) { hex in
                         Button {
@@ -703,7 +804,13 @@ struct AnnotationSidebar: View {
                                     colorFilter.isEmpty || colorFilter.contains(hex) ? 1 : 0.25)
                         }
                         .buttonStyle(.plain)
-                        .help("Show only this color")
+                        .help("\(reader.label(forHex: hex)) — click to filter")
+                        .contextMenu {
+                            Button("Label “\(reader.label(forHex: hex))”…") {
+                                labelText = reader.colorLabels[hex] ?? ""
+                                labelingHex = hex
+                            }
+                        }
                     }
                     Spacer()
                     if !colorFilter.isEmpty {
@@ -734,6 +841,22 @@ struct AnnotationSidebar: View {
                     if followPage { scrollToCurrentPage(proxy) }
                 }
             }
+        }
+        .alert(
+            "Label Color",
+            isPresented: Binding(
+                get: { labelingHex != nil },
+                set: { if !$0 { labelingHex = nil } }
+            )
+        ) {
+            TextField("e.g. Key finding", text: $labelText)
+            Button("Save") {
+                if let hex = labelingHex { reader.setColorLabel(labelText, forHex: hex) }
+                labelText = ""
+            }
+            Button("Cancel", role: .cancel) { labelText = "" }
+        } message: {
+            Text("Names this color in this document. Leave empty to remove the label.")
         }
     }
 
@@ -772,9 +895,12 @@ struct AnnotationRow: View {
                 Circle()
                     .fill(Color(nsColor: NSColor(hex: annotation.colorHex) ?? .systemYellow))
                     .frame(width: 8, height: 8)
-                Text("p. \(annotation.pageIndex + 1) · \(annotation.kind.rawValue)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    "p. \(annotation.pageIndex + 1) · \(annotation.kind.rawValue)"
+                        + (reader.colorLabels[annotation.colorHex].map { " · \($0)" } ?? "")
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 Spacer()
                 Button {
                     reader.delete(annotation)

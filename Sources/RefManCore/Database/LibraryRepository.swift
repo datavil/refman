@@ -190,6 +190,13 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    public func setCollectionIcon(id: Int64, to icon: String?) throws {
+        try dbWriter.write { db in
+            try db.execute(
+                sql: "UPDATE collection SET icon = ? WHERE id = ?", arguments: [icon, id])
+        }
+    }
+
     public func renameCollection(id: Int64, to name: String) throws {
         try dbWriter.write { db in
             try db.execute(
@@ -297,6 +304,29 @@ public final class LibraryRepository: Sendable {
                 .filter(Column("documentId") == documentId)
                 .order(Column("pageIndex"), Column("createdAt"))
                 .fetchAll(db)
+        }
+    }
+
+    // MARK: - Color labels
+
+    public func colorLabels(documentId: Int64) throws -> [String: String] {
+        try dbWriter.read { db in
+            let rows = try ColorLabel.filter(Column("documentId") == documentId).fetchAll(db)
+            return Dictionary(uniqueKeysWithValues: rows.map { ($0.colorHex, $0.label) })
+        }
+    }
+
+    /// Sets the label for a color in one document; an empty label removes it.
+    public func setColorLabel(documentId: Int64, colorHex: String, label: String) throws {
+        try dbWriter.write { db in
+            if label.isEmpty {
+                try db.execute(
+                    sql: "DELETE FROM colorLabel WHERE documentId = ? AND colorHex = ?",
+                    arguments: [documentId, colorHex])
+            } else {
+                try ColorLabel(documentId: documentId, colorHex: colorHex, label: label)
+                    .upsert(db)
+            }
         }
     }
 

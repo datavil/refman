@@ -113,6 +113,22 @@ import Testing
         #expect(annotations[0].selectedText == "important phrase")
     }
 
+    @Test func colorLabelsPerDocument() throws {
+        let repo = try makeRepo()
+        let a = try repo.insert(Document(title: "A"))
+        let b = try repo.insert(Document(title: "B"))
+
+        try repo.setColorLabel(documentId: a.id, colorHex: "#AF52DE", label: "key finding")
+        #expect(try repo.colorLabels(documentId: a.id) == ["#AF52DE": "key finding"])
+        #expect(try repo.colorLabels(documentId: b.id).isEmpty)  // scoped per document
+
+        try repo.setColorLabel(documentId: a.id, colorHex: "#AF52DE", label: "method")
+        #expect(try repo.colorLabels(documentId: a.id) == ["#AF52DE": "method"])
+
+        try repo.setColorLabel(documentId: a.id, colorHex: "#AF52DE", label: "")
+        #expect(try repo.colorLabels(documentId: a.id).isEmpty)  // empty label removes
+    }
+
     @Test func duplicateDOIRejected() throws {
         let repo = try makeRepo()
         try repo.insert(Document(title: "One", doi: "10.1/x"))

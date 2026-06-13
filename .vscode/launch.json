@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:refman}",
+            "name": "Debug RefMan",
+            "target": "RefMan",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug RefMan"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:refman}",
+            "name": "Release RefMan",
+            "target": "RefMan",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release RefMan"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:refman}",
+            "name": "Debug refman-agent",
+            "target": "refman-agent",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug refman-agent"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:refman}",
+            "name": "Release refman-agent",
+            "target": "refman-agent",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release refman-agent"
+        }
+    ]
+}

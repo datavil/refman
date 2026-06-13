@@ -109,6 +109,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshMetadata(id: Int64) {
+        guard let details = documents.first(where: { $0.document.id == id }) else { return }
+        Task {
+            do {
+                if try await pipeline.refreshMetadata(for: details.document) != nil {
+                    statusMessage = "Metadata refreshed"
+                } else {
+                    statusMessage = "No metadata found — needs a DOI or arXiv ID"
+                }
+                reload()
+            } catch {
+                statusMessage = "Refresh failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func importBibliographyViaPanel() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [
@@ -187,9 +203,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func createCollection(named name: String) {
+    func createCollection(named name: String, parentId: Int64? = nil) {
         do {
-            _ = try repository.createCollection(name: name)
+            _ = try repository.createCollection(name: name, parentId: parentId)
             reload()
         } catch {
             statusMessage = "Could not create collection: \(error.localizedDescription)"
@@ -210,6 +226,22 @@ final class AppModel: ObservableObject {
         guard let id = selectedDocumentId else { return }
         try? repository.add(documentId: id, toCollection: collectionId)
         reload()
+    }
+
+    func add(documentIds: [Int64], toCollection collectionId: Int64) {
+        for id in documentIds {
+            try? repository.add(documentId: id, toCollection: collectionId)
+        }
+        reload()
+    }
+
+    func setCollectionIcon(id: Int64, to icon: String?) {
+        do {
+            try repository.setCollectionIcon(id: id, to: icon)
+            reload()
+        } catch {
+            statusMessage = "Could not change icon: \(error.localizedDescription)"
+        }
     }
 
     func addTag(_ name: String) {

@@ -10,7 +10,8 @@
       "Bash(defaults domains *)",
       "Read(//private/tmp/**)",
       "Bash(claude -p 'Use get_current_document and reply with the paper title only.' --model haiku --output-format stream-json --verbose --include-partial-messages --strict-mcp-config --allowedTools mcp__refman --mcp-config '{\"mcpServers\":{\"refman\":{\"command\":\"__TRACKED_VAR__\",\"args\":[\"--mcp\"],\"env\":{\"REFMAN_DB_PATH\":\"__TRACKED_VAR__\",\"REFMAN_DOCUMENT_ID\":\"1\"}}}}')",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(ps -p 35035 -o pid,ppid,etime,command)"
     ]
   }
 }

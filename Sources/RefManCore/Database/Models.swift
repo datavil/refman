@@ -116,12 +116,17 @@ public struct Collection: Identifiable, Equatable, Hashable, Codable,
     public var uuid: String
     public var name: String
     public var parentId: Int64?
+    public var icon: String?
 
-    public init(id: Int64? = nil, uuid: String = UUID().uuidString, name: String, parentId: Int64? = nil) {
+    public init(
+        id: Int64? = nil, uuid: String = UUID().uuidString, name: String,
+        parentId: Int64? = nil, icon: String? = nil
+    ) {
         self.id = id
         self.uuid = uuid
         self.name = name
         self.parentId = parentId
+        self.icon = icon
     }
 
     public static let databaseTableName = "collection"
@@ -138,6 +143,21 @@ public struct CollectionDocument: Codable, FetchableRecord, PersistableRecord, S
     }
 
     public static let databaseTableName = "collectionDocument"
+}
+
+/// A per-document display name for an annotation color (e.g. purple = "key finding").
+public struct ColorLabel: Codable, Equatable, FetchableRecord, PersistableRecord, Sendable {
+    public var documentId: Int64
+    public var colorHex: String
+    public var label: String
+
+    public init(documentId: Int64, colorHex: String, label: String) {
+        self.documentId = documentId
+        self.colorHex = colorHex
+        self.label = label
+    }
+
+    public static let databaseTableName = "colorLabel"
 }
 
 public struct Tag: Identifiable, Equatable, Hashable, Codable,

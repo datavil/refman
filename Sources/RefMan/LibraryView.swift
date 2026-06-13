@@ -11,6 +11,9 @@ struct LibraryView: View {
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
     @State private var newCollectionName = ""
     @State private var showingNewCollection = false
+    @State private var collectionToDelete: RefManCore.Collection?
+    @State private var subcollectionParent: RefManCore.Collection?
+    @State private var subcollectionName = ""
     @State private var previewURL: URL?
 
     var body: some View {
@@ -81,15 +84,10 @@ struct LibraryView: View {
                     .tag(SidebarItem.all)
             }
             Section("Collections") {
-                ForEach(model.collections, id: \.id) { collection in
-                    Label(collection.name, systemImage: "folder")
-                        .tag(SidebarItem.collection(collection.id!))
-                        .contextMenu {
-                            Button("Delete Collection", role: .destructive) {
-                                model.deleteCollection(id: collection.id!)
-                            }
-                        }
-                }
+                CollectionTree(
+                    parentId: nil,
+                    collectionToDelete: $collectionToDelete,
+                    subcollectionParent: $subcollectionParent)
                 if showingNewCollection {
                     TextField("Collection name", text: $newCollectionName)
                     .onSubmit {
@@ -118,6 +116,37 @@ struct LibraryView: View {
             }
         }
         .listStyle(.sidebar)
+        .confirmationDialog(
+            "Delete “\(collectionToDelete?.name ?? "")”?",
+            isPresented: Binding(
+                get: { collectionToDelete != nil },
+                set: { if !$0 { collectionToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = collectionToDelete?.id { model.deleteCollection(id: id) }
+                collectionToDelete = nil
+            }
+        } message: {
+            Text("Subcollections are also deleted. Documents stay in the library.")
+        }
+        .alert(
+            "New Subcollection in “\(subcollectionParent?.name ?? "")”",
+            isPresented: Binding(
+                get: { subcollectionParent != nil },
+                set: { if !$0 { subcollectionParent = nil } }
+            )
+        ) {
+            TextField("Name", text: $subcollectionName)
+            Button("Create") {
+                if let parent = subcollectionParent, !subcollectionName.isEmpty {
+                    model.createCollection(named: subcollectionName, parentId: parent.id)
+                }
+                subcollectionName = ""
+            }
+            Button("Cancel", role: .cancel) { subcollectionName = "" }
+        }
         .safeAreaInset(edge: .bottom, alignment: .leading) {
             Button {
                 openSettings()
@@ -131,8 +160,52 @@ struct LibraryView: View {
         }
     }
 
+    fileprivate static let collectionIcons: [(group: String, icons: [(name: String, symbol: String)])] = [
+        (
+            "Library",
+            [
+                ("Folder", "folder"), ("Books", "books.vertical"), ("Book", "book.closed"),
+                ("Document", "doc.text"), ("Archive", "archivebox"), ("Tray", "tray.full"),
+                ("Bookmark", "bookmark"), ("Tag", "tag"), ("Pin", "pin"),
+                ("Paperclip", "paperclip"),
+            ]
+        ),
+        (
+            "Science",
+            [
+                ("Flask", "flask"), ("Test Tube", "testtube.2"), ("Microbe", "microbe"),
+                ("Allergens", "allergens"), ("Atom", "atom"), ("Brain", "brain"),
+                ("Syringe", "syringe"), ("Pills", "pills"), ("Stethoscope", "stethoscope"),
+                ("Leaf", "leaf"), ("Pawprint", "pawprint"), ("Fish", "fish"),
+                ("Bird", "bird"),
+            ]
+        ),
+        (
+            "Data",
+            [
+                ("Bar Chart", "chart.bar"), ("Trend", "chart.line.uptrend.xyaxis"),
+                ("Function", "function"), ("Square Root", "x.squareroot"),
+                ("Terminal", "terminal"), ("Gear", "gearshape"),
+            ]
+        ),
+        (
+            "Symbols",
+            [
+                ("Star", "star"), ("Heart", "heart"), ("Flag", "flag"), ("Bolt", "bolt"),
+                ("Flame", "flame"), ("Drop", "drop"), ("Snowflake", "snowflake"),
+                ("Sun", "sun.max"), ("Moon", "moon"), ("Sparkles", "sparkles"),
+                ("Globe", "globe"), ("Map", "map"), ("Clock", "clock"),
+                ("Calendar", "calendar"), ("Lightbulb", "lightbulb"),
+                ("Graduation Cap", "graduationcap"), ("People", "person.2"),
+                ("Museum", "building.columns"), ("Puzzle", "puzzlepiece"),
+                ("Cube", "cube"), ("Palette", "paintpalette"), ("Camera", "camera"),
+                ("Music Note", "music.note"), ("Eye", "eye"),
+            ]
+        ),
+    ]
+
     private var documentTable: some View {
-        Table(model.documents, selection: $model.selectedDocumentId) {
+        Table(of: DocumentDetails.self, selection: $model.selectedDocumentId) {
             TableColumn("Title") { details in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(details.document.title.isEmpty ? "Untitled" : details.document.title)
@@ -160,10 +233,16 @@ struct LibraryView: View {
                 }
             }
             .width(36)
+        } rows: {
+            ForEach(model.documents) { details in
+                TableRow(details)
+                    .itemProvider { NSItemProvider(object: String(details.id) as NSString) }
+            }
         }
         .contextMenu(forSelectionType: Int64.self) { ids in
             if let id = ids.first {
                 Button("Open PDF") { openReader(id) }
+                Button("Refresh Metadata") { model.refreshMetadata(id: id) }
                 Menu("Add to Collection") {
                     ForEach(model.collections, id: \.id) { collection in
                         Button(collection.name) {
@@ -216,5 +295,63 @@ struct LibraryView: View {
             if !urls.isEmpty { model.importPDFs(at: urls) }
         }
         return true
+    }
+}
+
+/// One level of the collection hierarchy; recurses for subcollections.
+private struct CollectionTree: View {
+    @EnvironmentObject var model: AppModel
+    let parentId: Int64?
+    @Binding var collectionToDelete: RefManCore.Collection?
+    @Binding var subcollectionParent: RefManCore.Collection?
+
+    var body: some View {
+        ForEach(model.collections.filter { $0.parentId == parentId }, id: \.id) { collection in
+            if model.collections.contains(where: { $0.parentId == collection.id }) {
+                DisclosureGroup {
+                    CollectionTree(
+                        parentId: collection.id,
+                        collectionToDelete: $collectionToDelete,
+                        subcollectionParent: $subcollectionParent)
+                } label: {
+                    row(for: collection)
+                }
+                .tag(SidebarItem.collection(collection.id!))
+            } else {
+                row(for: collection)
+                    .tag(SidebarItem.collection(collection.id!))
+            }
+        }
+    }
+
+    private func row(for collection: RefManCore.Collection) -> some View {
+        Label(collection.name, systemImage: collection.icon ?? "folder")
+            .contextMenu {
+                Menu("Icon") {
+                    ForEach(LibraryView.collectionIcons, id: \.group) { group in
+                        Section(group.group) {
+                            ForEach(group.icons, id: \.symbol) { icon in
+                                Button {
+                                    model.setCollectionIcon(id: collection.id!, to: icon.symbol)
+                                } label: {
+                                    Label(icon.name, systemImage: icon.symbol)
+                                }
+                            }
+                        }
+                    }
+                }
+                Button("New Subcollection") {
+                    subcollectionParent = collection
+                }
+                Button("Delete Collection", role: .destructive) {
+                    collectionToDelete = collection
+                }
+            }
+            .dropDestination(for: String.self) { items, _ in
+                let ids = items.compactMap(Int64.init)
+                guard !ids.isEmpty else { return false }
+                model.add(documentIds: ids, toCollection: collection.id!)
+                return true
+            }
     }
 }

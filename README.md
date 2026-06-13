@@ -24,6 +24,17 @@ Requirements: macOS 14+, Xcode toolchain. For the assistant: [Ollama](https://ol
 running locally with at least one tool-capable model pulled (e.g. `ollama pull qwen3:14b`).
 Override with `REFMAN_OLLAMA_MODEL` / `REFMAN_OLLAMA_HOST`.
 
+## Build a macOS app
+
+```sh
+scripts/build_app.sh
+open dist/RefMan.app
+```
+
+The bundle includes both the SwiftUI app and the bundled `refman-agent` used by
+the Assistant. The script ad-hoc signs the app for local use; set
+`SKIP_CODESIGN=1` to skip signing.
+
 ## Test
 
 ```sh
