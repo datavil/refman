@@ -12,6 +12,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.app
       - name: Build and test
         run: swift test
 
@@ -23,6 +25,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.app
       - name: Build app bundle
         env:
           VERSION: ${{ github.ref_name }}
