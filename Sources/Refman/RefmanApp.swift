@@ -1,9 +1,9 @@
 import AppKit
-import RefManCore
+import RefmanCore
 import SwiftUI
 
 @main
-struct RefManApp: App {
+struct RefmanApp: App {
     @StateObject private var model = AppModel.live()
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
 
@@ -19,7 +19,7 @@ struct RefManApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("RefMan") {
+        WindowGroup("Refman") {
             LibraryView()
                 .environmentObject(model)
                 .frame(minWidth: 1000, minHeight: 620)
@@ -28,6 +28,8 @@ struct RefManApp: App {
         .defaultSize(width: 1600, height: 1000)
         .commands {
             CommandGroup(after: .newItem) {
+                Button("New Reference…") { model.requestAdd() }
+                    .keyboardShortcut("n", modifiers: [.command])
                 Button("Import PDFs…") { model.importViaPanel() }
                     .keyboardShortcut("i", modifiers: [.command])
                 Button("Import BibTeX/RIS…") { model.importBibliographyViaPanel() }
@@ -36,6 +38,19 @@ struct RefManApp: App {
                 Button("Export Library as BibTeX…") { model.exportViaPanel(format: .bibtex) }
                 Button("Export Library as RIS…") { model.exportViaPanel(format: .ris) }
                 Button("Export Library as CSL-JSON…") { model.exportViaPanel(format: .cslJSON) }
+            }
+            CommandGroup(after: .toolbar) {
+                Button("Quick Open…") { model.requestPalette() }
+                    .keyboardShortcut("k", modifiers: [.command])
+            }
+            CommandMenu("Library") {
+                Button("Move to Trash") { model.deleteSelectedDocument() }
+                    .keyboardShortcut(.delete, modifiers: [.command])
+                    .disabled(model.selectedDocumentId == nil)
+                Button("Empty Trash") { model.emptyTrash() }
+                Divider()
+                Button("Back Up Library…") { model.backupViaPanel() }
+                    .keyboardShortcut("b", modifiers: [.command, .shift])
             }
         }
 
@@ -50,6 +65,7 @@ struct RefManApp: App {
 
         Settings {
             SettingsView()
+                .environmentObject(model)
                 .preferredColorScheme(colorScheme)
         }
     }

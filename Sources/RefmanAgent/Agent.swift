@@ -1,29 +1,37 @@
 import Foundation
-import RefManCore
+import RefmanCore
 
-/// refman-agent: an ACP agent that bridges to a local LLM via Ollama, or to
-/// Claude via the Claude Code CLI (billed to the user's Claude subscription).
+/// refman-agent: an ACP agent that bridges to a local LLM via Ollama, to the
+/// OpenAI API, or to Claude via the Claude Code CLI (billed to the user's
+/// Claude subscription).
 ///
 /// Speaks ACP (ndjson JSON-RPC on stdio): initialize, session/new,
 /// session/prompt with streamed agent_message_chunk updates. When the model
-/// requests a tool, the agent forwards it to the client (the RefMan app)
+/// requests a tool, the agent forwards it to the client (the Refman app)
 /// as a `refman/toolCall` request — the app owns the library, not the agent.
 /// The Claude backend instead injects the open paper's text and annotations
 /// into the system prompt up front (no tool round-trips).
 ///
 /// Environment:
-///   REFMAN_BACKEND       "ollama" (default) or "claude"
-///   REFMAN_OLLAMA_HOST   default http://127.0.0.1:11434
-///   REFMAN_OLLAMA_MODEL  default: largest installed model
-///   REFMAN_CLAUDE_MODEL  e.g. "sonnet"/"opus"; default: Claude Code's default
+///   REFMAN_BACKEND        "ollama" (default), "openai", or "claude"
+///   REFMAN_OLLAMA_HOST    default http://127.0.0.1:11434
+///   REFMAN_OLLAMA_MODEL   default: largest installed model
+///   REFMAN_OPENAI_MODEL   Codex model; default: Codex's default
+///   REFMAN_CLAUDE_MODEL   e.g. "sonnet"/"opus"; default: Claude Code's default
+///
+/// The "openai" backend drives OpenAI's Codex CLI signed in with the user's
+/// ChatGPT subscription (no API key). Like the Claude backend it injects the
+/// open paper's context up front rather than doing tool round-trips.
 
 let backend = ProcessInfo.processInfo.environment["REFMAN_BACKEND"] ?? "ollama"
 
 let ollamaHost = ProcessInfo.processInfo.environment["REFMAN_OLLAMA_HOST"]
     ?? "http://127.0.0.1:11434"
 
+let openaiModel = ProcessInfo.processInfo.environment["REFMAN_OPENAI_MODEL"] ?? ""
+
 let systemPrompt = """
-    You are RefMan's research assistant, embedded in a reference manager. \
+    You are Refman's research assistant, embedded in a reference manager. \
     The user is reading one specific paper — the "currently open paper" — and \
     questions are about THAT paper unless they clearly ask otherwise.
 
@@ -163,6 +171,149 @@ func ollamaChat(
                 toolCalls: message["tool_calls"] as? [[String: Any]] ?? [],
                 done: object["done"] as? Bool ?? false
             ))
+    }
+}
+
+// MARK: - Codex CLI backend (ChatGPT subscription, no API key)
+
+let codexModel = openaiModel
+
+/// Locate the Codex CLI; GUI-spawned processes get a minimal PATH.
+func resolveCodexBinary() -> String? {
+    let home = NSHomeDirectory()
+    let candidates = [
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+        "\(home)/.local/bin/codex",
+    ]
+    for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+        return path
+    }
+    let probe = Process()
+    probe.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    probe.arguments = ["-lc", "command -v codex"]
+    let pipe = Pipe()
+    probe.standardInput = FileHandle.nullDevice
+    probe.standardOutput = pipe
+    probe.standardError = FileHandle.nullDevice
+    guard (try? probe.run()) != nil else { return nil }
+    probe.waitUntilExit()
+    let out = String(
+        data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return out.isEmpty ? nil : out
+}
+
+/// Open the library directly (the app passes its path and the open document)
+/// and assemble the paper's context to inject into the prompt, reusing the
+/// same tools the other backends call.
+func codexContext() -> String? {
+    let env = ProcessInfo.processInfo.environment
+    guard let dbPath = env["REFMAN_DB_PATH"],
+        let documentId = Int64(env["REFMAN_DOCUMENT_ID"] ?? ""),
+        let database = try? AppDatabase.openShared(at: URL(fileURLWithPath: dbPath))
+    else { return nil }
+    let repository = LibraryRepository(database)
+    func tool(_ name: String) -> String {
+        (try? LibraryTools.handle(
+            name: name, arguments: [:], repository: repository,
+            currentDocumentId: documentId, textLimit: 120_000)) ?? ""
+    }
+    return """
+        Currently open paper (metadata):
+        \(tool("get_current_document"))
+
+        The user's annotations on this paper:
+        \(tool("get_annotations"))
+
+        Full text of this paper:
+        \(tool("get_document_text"))
+        """
+}
+
+/// One turn against `codex exec`, emitting the assistant's reply text. Codex is
+/// run stateless (full paper context injected each turn) — no resume, so it has
+/// no memory of earlier turns in the conversation.
+///
+/// NOTE: Codex's `--json` event schema and flags are version-sensitive; parsing
+/// here is deliberately defensive (any item whose type mentions "message").
+func codexChat(
+    binary: String,
+    prompt: String,
+    onText: @escaping (String) -> Void
+) async throws {
+    var args = ["exec", "--json", "--skip-git-repo-check"]
+    if !codexModel.isEmpty { args += ["--model", codexModel] }
+    args.append(prompt)
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: binary)
+    process.arguments = args
+    // Neutral cwd so Codex doesn't pick up some project's context.
+    process.currentDirectoryURL = FileManager.default.temporaryDirectory
+    process.standardInput = FileHandle.nullDevice
+    let stdout = Pipe()
+    process.standardOutput = stdout
+    process.standardError = FileHandle.nullDevice
+
+    final class Parse {
+        var buffer = Data()
+        var emitted = false
+    }
+    let state = Parse()
+
+    @Sendable func parse(_ lineData: Data) {
+        guard let object = (try? JSONSerialization.jsonObject(with: lineData)) as? [String: Any]
+        else { return }
+        // Codex emits a completed "agent_message" item carrying the reply text.
+        let item = object["item"] as? [String: Any] ?? object
+        let type = (item["type"] as? String) ?? (object["type"] as? String) ?? ""
+        guard type.contains("message"),
+            object["type"] as? String != "item.updated"  // avoid partial dupes
+        else { return }
+        if let text = item["text"] as? String, !text.isEmpty {
+            state.emitted = true
+            onText(text)
+        }
+    }
+
+    try process.run()
+
+    let handle = stdout.fileHandleForReading
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        handle.readabilityHandler = { fh in
+            let chunk = fh.availableData
+            if chunk.isEmpty {  // EOF
+                fh.readabilityHandler = nil
+                if !state.buffer.isEmpty {
+                    parse(state.buffer)
+                    state.buffer.removeAll()
+                }
+                continuation.resume()
+                return
+            }
+            state.buffer.append(chunk)
+            while let nl = state.buffer.firstIndex(of: 0x0A) {
+                let lineData = state.buffer.subdata(in: state.buffer.startIndex..<nl)
+                state.buffer.removeSubrange(state.buffer.startIndex...nl)
+                if !lineData.isEmpty { parse(lineData) }
+            }
+        }
+    }
+    process.waitUntilExit()
+
+    if process.terminationStatus != 0 {
+        throw NSError(
+            domain: "refman-agent", code: 5,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Codex exited with status \(process.terminationStatus) — run `codex` in Terminal to check it is installed and signed in (`codex login`)."
+            ])
+    }
+    if !state.emitted {
+        throw NSError(
+            domain: "refman-agent", code: 6,
+            userInfo: [NSLocalizedDescriptionKey: "Codex returned no message."])
     }
 }
 
@@ -419,7 +570,12 @@ struct Agent {
             try await runMCPServer()
             return
         }
-        let model = backend == "claude" ? "" : await resolveModel()
+        let model: String
+        switch backend {
+        case "claude": model = ""
+        case "openai": model = openaiModel
+        default: model = await resolveModel()
+        }
         let state = AgentState()
         let peer = JSONRPCPeer(input: .standardInput, output: .standardOutput)
 
@@ -547,7 +703,7 @@ struct Agent {
                     throw JSONRPCPeer.RPCError(
                         code: -32000,
                         message:
-                            "Claude Code CLI not found — install it (`npm install -g @anthropic-ai/claude-code`) and run `claude` once to log in.")
+                            "Claude Code CLI not found — install it (`curl -fsSL https://claude.ai/install.sh | bash`) and run `claude` once to log in.")
                 }
                 // --resume does not carry --append-system-prompt over, so
                 // pass the (tool-aware) system prompt on every turn.
@@ -559,6 +715,22 @@ struct Agent {
                 if let claudeId {
                     state.setClaudeSession(claudeId, for: sessionId)
                 }
+                return ["stopReason": "end_turn"]
+            }
+
+            if backend == "openai" {
+                guard let binary = resolveCodexBinary() else {
+                    throw JSONRPCPeer.RPCError(
+                        code: -32000,
+                        message:
+                            "Codex CLI not found — install it (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`) and run `codex login` to sign in with ChatGPT.")
+                }
+                // Codex is stateless here, so inject the paper context + the
+                // assistant instructions on every turn alongside the question.
+                var prompt = systemPrompt + "\n\n"
+                if let context = codexContext() { prompt += context + "\n\n" }
+                prompt += "Question: " + userText
+                try await codexChat(binary: binary, prompt: prompt, onText: emit)
                 return ["stopReason": "end_turn"]
             }
 

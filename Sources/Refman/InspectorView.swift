@@ -1,4 +1,4 @@
-import RefManCore
+import RefmanCore
 import SwiftUI
 
 /// Right-hand metadata editor for the selected document.

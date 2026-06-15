@@ -1,0 +1,25 @@
+{
+  "header": { "type": "esummary", "version": "0.3" },
+  "result": {
+    "uids": ["34265844"],
+    "34265844": {
+      "uid": "34265844",
+      "pubdate": "2021 Aug",
+      "source": "Nature",
+      "authors": [
+        { "name": "Jumper J", "authtype": "Author" },
+        { "name": "Evans R", "authtype": "Author" },
+        { "name": "Pritzel A", "authtype": "Author" }
+      ],
+      "title": "Highly accurate protein structure prediction with AlphaFold.",
+      "volume": "596",
+      "issue": "7873",
+      "pages": "583-589",
+      "fulljournalname": "Nature",
+      "articleids": [
+        { "idtype": "pubmed", "value": "34265844" },
+        { "idtype": "doi", "value": "10.1038/s41586-021-03819-2" }
+      ]
+    }
+  }
+}

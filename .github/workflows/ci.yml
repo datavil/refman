@@ -34,28 +34,28 @@ jobs:
           VERSION="${VERSION#v}" scripts/build_app.sh
       - name: Package zip
         run: |
-          ditto -c -k --keepParent dist/RefMan.app "RefMan-${{ github.ref_name }}.zip"
+          ditto -c -k --keepParent dist/Refman.app "Refman-${{ github.ref_name }}.zip"
       - name: Package dmg
         run: |
           mkdir -p dmg-staging
-          cp -R dist/RefMan.app dmg-staging/
+          cp -R dist/Refman.app dmg-staging/
           ln -s /Applications dmg-staging/Applications
-          hdiutil create -volname "RefMan ${{ github.ref_name }}" \
+          hdiutil create -volname "Refman ${{ github.ref_name }}" \
             -srcfolder dmg-staging -ov -format UDZO \
-            "RefMan-${{ github.ref_name }}.dmg"
+            "Refman-${{ github.ref_name }}.dmg"
       - name: Write release notes
         run: |
           cat > release-notes.md <<'EOF'
           ## Install
 
-          Download the `.dmg` (drag RefMan to Applications) or the `.zip`.
+          Download the `.dmg` (drag Refman to Applications) or the `.zip`.
 
-          RefMan is not signed with an Apple Developer ID, so on first launch
-          macOS shows **"RefMan can't be opened because Apple cannot check it
+          Refman is not signed with an Apple Developer ID, so on first launch
+          macOS shows **"Refman can't be opened because Apple cannot check it
           for malicious software."** To open it:
 
-          - **Right-click** RefMan.app → **Open** → **Open** in the dialog, or
-          - run `xattr -dr com.apple.quarantine /Applications/RefMan.app`
+          - **Right-click** Refman.app → **Open** → **Open** in the dialog, or
+          - run `xattr -dr com.apple.quarantine /Applications/Refman.app`
 
           You only need to do this once.
           EOF
@@ -64,8 +64,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            "RefMan-${{ github.ref_name }}.zip" \
-            "RefMan-${{ github.ref_name }}.dmg" \
+            "Refman-${{ github.ref_name }}.zip" \
+            "Refman-${{ github.ref_name }}.dmg" \
             --title "${{ github.ref_name }}" \
             --notes-file release-notes.md \
             --generate-notes

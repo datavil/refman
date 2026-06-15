@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import RefManCore
+@testable import RefmanCore
 
 @Suite struct BibTeXTests {
     let sample = """
@@ -154,5 +154,34 @@ import Testing
         #expect(obj["DOI"] as? String == "10.1/csl")
         let issued = try #require(obj["issued"] as? [String: Any])
         #expect((issued["date-parts"] as? [[Int]])?.first?.first == 2023)
+    }
+}
+
+@Suite struct TextDecodingTests {
+    @Test func decodesHTMLEntities() {
+        #expect(TextDecoding.clean("Cell Host &amp; Microbe") == "Cell Host & Microbe")
+        #expect(TextDecoding.clean("A &lt;i&gt;gene&lt;/i&gt;") == "A <i>gene</i>")
+        #expect(TextDecoding.clean("5 &#956;m &#x3B1;") == "5 μm α")
+        #expect(TextDecoding.clean("R&D and AT&T") == "R&D and AT&T")  // not entities
+    }
+
+    @Test func decodesLaTeXAccents() {
+        #expect(TextDecoding.clean(#"M\"uller"#) == "Müller")
+        #expect(TextDecoding.clean(#"{\'e}cole"#) == "école")
+        #expect(TextDecoding.clean(#"Erd\H{o}s"#) == "Erdős")
+        #expect(TextDecoding.clean(#"Stra\ss e"#) == "Straße")
+        #expect(TextDecoding.clean(#"Sl\v{a}vik"#) == "Slǎvik")  // \v = caron
+    }
+
+    @Test func decodesLaTeXCommandsAndMath() {
+        #expect(TextDecoding.clean(#"TGF-$\beta$ signaling"#) == "TGF-β signaling")
+        #expect(TextDecoding.clean(#"\textbf{Bold} title"#) == "Bold title")
+        #expect(TextDecoding.clean("{DNA} repair") == "DNA repair")
+        #expect(TextDecoding.clean(#"50 \% yield"#) == "50 % yield")
+    }
+
+    @Test func leavesUnknownCommandsAlone() {
+        // Unknown commands are kept verbatim (braces are still stripped).
+        #expect(TextDecoding.clean(#"see \cite{ref}"#) == "see \\citeref")
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum AppAppearance: String, CaseIterable, Identifiable {
     case system, light, dark
@@ -25,11 +26,24 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 
 enum SettingsKeys {
     static let appearance = "appearance"
+    static let rowDensity = "rowDensity"
     static let agentPath = "agentPath"
-    static let llmProvider = "llmProvider"  // "ollama" | "claude"
+    static let llmProvider = "llmProvider"  // "ollama" | "openai" | "claude"
     static let ollamaModel = "ollamaModel"
     static let claudeModel = "claudeModel"
+    static let openaiModel = "openaiModel"
     static let highlightPalette = "highlightPalette"
+    static let contactEmail = "contactEmail"
+    static let libraryRootPath = "libraryRootPath"
+}
+
+enum RowDensity: String, CaseIterable, Identifiable {
+    case comfortable, compact
+
+    var id: String { rawValue }
+    var label: String { self == .comfortable ? "Comfortable" : "Compact" }
+    /// Minimum row height for the document table.
+    var rowHeight: CGFloat { self == .comfortable ? 34 : 22 }
 }
 
 /// Lists models from a local Ollama for the model picker.
@@ -59,14 +73,50 @@ final class OllamaModelList: ObservableObject {
     }
 }
 
+/// Lists Codex's available models from its local cache (`~/.codex/models_cache.json`)
+/// for the model picker — Codex has no list-models command.
+@MainActor
+final class CodexModelList: ObservableObject {
+    @Published var models: [(slug: String, name: String)] = []
+
+    func load() {
+        let home = ProcessInfo.processInfo.environment["CODEX_HOME"]
+            ?? "\(NSHomeDirectory())/.codex"
+        let url = URL(fileURLWithPath: "\(home)/models_cache.json")
+        struct Cache: Decodable {
+            struct Model: Decodable {
+                let slug: String
+                let display_name: String?
+                let visibility: String?
+            }
+            let models: [Model]
+        }
+        guard let data = try? Data(contentsOf: url),
+            let cache = try? JSONDecoder().decode(Cache.self, from: data)
+        else {
+            models = []
+            return
+        }
+        models =
+            cache.models
+            .filter { $0.visibility == "list" }
+            .map { (slug: $0.slug, name: $0.display_name ?? $0.slug) }
+    }
+}
+
 struct SettingsView: View {
+    @EnvironmentObject var model: AppModel
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
+    @AppStorage(SettingsKeys.rowDensity) private var rowDensity = RowDensity.comfortable.rawValue
     @AppStorage(SettingsKeys.agentPath) private var agentPath = ""
     @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
     @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
     @AppStorage(SettingsKeys.claudeModel) private var claudeModel = ""
+    @AppStorage(SettingsKeys.openaiModel) private var openaiModel = ""
+    @AppStorage(SettingsKeys.contactEmail) private var contactEmail = ""
 
     @StateObject private var modelList = OllamaModelList()
+    @StateObject private var codexList = CodexModelList()
 
     var body: some View {
         Form {
@@ -77,6 +127,28 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                Picker("List density", selection: $rowDensity) {
+                    ForEach(RowDensity.allCases) { option in
+                        Text(option.label).tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            LibrarySettingsSection()
+
+            ICloudSettingsSection()
+
+            Section("Metadata & Downloads") {
+                TextField(
+                    "Contact email", text: $contactEmail,
+                    prompt: Text("you@example.com"))
+                Text(
+                    "Used to fetch open-access PDFs (Unpaywall) and for polite API "
+                        + "access to CrossRef. Required for DOI PDF downloads."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Section("Assistant Agent") {
@@ -111,7 +183,29 @@ struct SettingsView: View {
                         Text(
                             "Uses the Claude Code CLI signed in with your Claude "
                                 + "subscription — no API key, no per-token billing. Install with "
-                                + "`npm install -g @anthropic-ai/claude-code` and run `claude` once to log in."
+                                + "`curl -fsSL https://claude.ai/install.sh | bash` and run `claude` once to log in."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                } else if llmProvider == "openai" {
+                    Section("OpenAI (Codex)") {
+                        if codexList.models.isEmpty {
+                            TextField(
+                                "Model", text: $openaiModel,
+                                prompt: Text("Codex default"))
+                        } else {
+                            Picker("Model", selection: $openaiModel) {
+                                Text("Default (Codex config)").tag("")
+                                ForEach(codexList.models, id: \.slug) { model in
+                                    Text(model.name).tag(model.slug)
+                                }
+                            }
+                        }
+                        Text(
+                            "Uses the Codex CLI signed in with your ChatGPT subscription "
+                                + "— no API key, no per-token billing. Install with "
+                                + "`curl -fsSL https://chatgpt.com/codex/install.sh | sh` and run `codex login` once to sign in."
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -148,9 +242,145 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
-        .onAppear { modelList.load() }
+        .frame(width: 480, height: 600)
+        .onAppear {
+            modelList.load()
+            codexList.load()
+        }
+        .background {
+            // Esc closes the Settings window.
+            Button("") { NSApp.keyWindow?.close() }
+                .keyboardShortcut(.cancelAction)
+                .hidden()
+        }
+    }
+}
+
+/// Library stats, backup/restore, and integrity check.
+struct LibrarySettingsSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var stats: LibraryStats?
+    @State private var report: IntegrityReport?
+    @State private var showingReport = false
+    @State private var confirmRestore: URL?
+
+    var body: some View {
+        Section("Library") {
+            if let stats {
+                LabeledContent("Documents", value: "\(stats.documents)")
+                LabeledContent("With PDF", value: "\(stats.withPDF)")
+                LabeledContent("In Trash", value: "\(stats.trashed)")
+                LabeledContent(
+                    "Storage",
+                    value: ByteCountFormatter.string(
+                        fromByteCount: stats.sizeBytes, countStyle: .file))
+            }
+            HStack {
+                Button("Back Up…", action: backUp)
+                Button("Restore…", action: chooseRestore)
+                Spacer()
+                Button("Check Integrity", action: checkIntegrity)
+            }
+            .buttonStyle(.bordered)
+        }
+        .onAppear { stats = model.libraryStats() }
+        .alert("Library Integrity", isPresented: $showingReport, presenting: report) { report in
+            if !report.orphanHashes.isEmpty {
+                Button("Remove \(report.orphanHashes.count) Orphaned File\(report.orphanHashes.count == 1 ? "" : "s")") {
+                    model.removeOrphanFiles(report.orphanHashes)
+                    stats = model.libraryStats()
+                }
+            }
+            Button("OK", role: .cancel) {}
+        } message: { report in
+            if report.isClean {
+                Text("No problems found.")
+            } else {
+                Text(
+                    "\(report.missing.count) document(s) missing their PDF, "
+                        + "\(report.orphanHashes.count) orphaned file(s) on disk.")
+            }
+        }
+        .alert(
+            "Restore from Backup?",
+            isPresented: Binding(
+                get: { confirmRestore != nil }, set: { if !$0 { confirmRestore = nil } })
+        ) {
+            Button("Restore", role: .destructive) {
+                if let url = confirmRestore { model.restore(from: url) }
+                confirmRestore = nil
+            }
+            Button("Cancel", role: .cancel) { confirmRestore = nil }
+        } message: {
+            Text("This replaces your current library. Quit and reopen Refman afterward.")
+        }
+    }
+
+    private func backUp() {
+        model.backupViaPanel()
+    }
+
+    private func chooseRestore() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        confirmRestore = url
+    }
+
+    private func checkIntegrity() {
+        report = model.runIntegrityCheck()
+        showingReport = report != nil
+    }
+}
+
+/// Library location and iCloud Drive sync.
+struct ICloudSettingsSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var confirmMove: MoveTarget?
+
+    enum MoveTarget { case iCloud, local }
+
+    var body: some View {
+        Section("iCloud Sync") {
+            LabeledContent("Location", value: model.libraryLocationDisplay)
+            if model.isInICloudDrive {
+                Label("Syncing via iCloud Drive", systemImage: "checkmark.icloud")
+                    .foregroundStyle(.green)
+                Button("Move Back to This Mac…") { confirmMove = .local }
+            } else {
+                Button("Move to iCloud Drive…") { confirmMove = .iCloud }
+                    .disabled(!model.iCloudDriveAvailable)
+                if !model.iCloudDriveAvailable {
+                    Text("iCloud Drive isn't enabled on this Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Text(
+                "Keep Refman open on only one Mac at a time. iCloud Drive syncs files "
+                    + "but can't merge simultaneous edits to the library database."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .alert(
+            "Move Library?",
+            isPresented: Binding(
+                get: { confirmMove != nil }, set: { if !$0 { confirmMove = nil } })
+        ) {
+            Button("Move", role: .destructive) {
+                switch confirmMove {
+                case .iCloud: model.moveLibraryToICloudDrive()
+                case .local: model.moveLibraryToLocal()
+                case nil: break
+                }
+                confirmMove = nil
+            }
+            Button("Cancel", role: .cancel) { confirmMove = nil }
+        } message: {
+            Text(
+                "Your library (database and PDFs) will be moved. Quit and reopen "
+                    + "Refman afterward to use the new location.")
+        }
     }
 }
 
@@ -162,8 +392,9 @@ struct AssistantProviderPicker: View {
 
     var body: some View {
         Picker(label, selection: $selection) {
-            Text("Local (Ollama)").tag("ollama")
-            Text(compact ? "Claude" : "Claude (subscription)").tag("claude")
+            Text(compact ? "Ollama" : "Local (Ollama)").tag("ollama")
+            Text("OpenAI").tag("openai")
+            Text("Claude").tag("claude")
         }
         .pickerStyle(.segmented)
     }

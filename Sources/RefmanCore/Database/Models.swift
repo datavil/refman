@@ -25,6 +25,8 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
     public var fileName: String?
     public var addedAt: Date
     public var modifiedAt: Date
+    /// Set when the document is in the Trash; nil for live documents.
+    public var deletedAt: Date?
 
     public init(
         id: Int64? = nil,
@@ -43,7 +45,8 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
         fileHash: String? = nil,
         fileName: String? = nil,
         addedAt: Date = Date(),
-        modifiedAt: Date = Date()
+        modifiedAt: Date = Date(),
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.uuid = uuid
@@ -62,6 +65,7 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
         self.fileName = fileName
         self.addedAt = addedAt
         self.modifiedAt = modifiedAt
+        self.deletedAt = deletedAt
     }
 
     public static let databaseTableName = "document"

@@ -2,7 +2,7 @@ import Foundation
 import PDFKit
 import Testing
 
-@testable import RefManCore
+@testable import RefmanCore
 
 @Suite struct ImportPipelineTests {
     /// Renders a one-page PDF containing the given text.

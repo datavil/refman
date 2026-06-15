@@ -19,6 +19,11 @@ public struct DocumentDetails: Identifiable, Equatable, Hashable, Sendable {
     public var authorsText: String {
         authors.map(\.displayName).joined(separator: ", ")
     }
+
+    // Non-optional keys for table sorting.
+    public var sortTitle: String { document.title }
+    public var sortYear: Int { document.year ?? 0 }
+    public var sortVenue: String { document.venue ?? "" }
 }
 
 /// High-level library operations. All writes keep the FTS index in sync.
@@ -53,7 +58,8 @@ public final class LibraryRepository: Sendable {
     @discardableResult
     public func update(
         _ document: Document,
-        authors: [Author]? = nil
+        authors: [Author]? = nil,
+        fullText: String? = nil
     ) throws -> DocumentDetails {
         try dbWriter.write { db in
             var doc = document
@@ -66,7 +72,8 @@ public final class LibraryRepository: Sendable {
             } else {
                 savedAuthors = try Self.fetchAuthors(db, documentId: doc.id!)
             }
-            let body = try String.fetchOne(
+            // Use freshly extracted text when provided; otherwise keep the existing body.
+            let body = try fullText ?? String.fetchOne(
                 db, sql: "SELECT body FROM documentFTS WHERE rowid = ?", arguments: [doc.id!])
             try Self.updateFTS(db, document: doc, authors: savedAuthors, body: body)
             let tags = try Self.fetchTags(db, documentId: doc.id!)
@@ -74,10 +81,47 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    /// Moves a document to the Trash (recoverable). Its PDF and FTS row are kept.
     public func delete(documentId: Int64) throws {
+        try dbWriter.write { db in
+            try db.execute(
+                sql: "UPDATE document SET deletedAt = ?, modifiedAt = ? WHERE id = ?",
+                arguments: [Date(), Date(), documentId])
+        }
+    }
+
+    /// Restores a trashed document.
+    public func restore(documentId: Int64) throws {
+        try dbWriter.write { db in
+            try db.execute(
+                sql: "UPDATE document SET deletedAt = NULL, modifiedAt = ? WHERE id = ?",
+                arguments: [Date(), documentId])
+        }
+    }
+
+    /// Permanently deletes a single document and its FTS row.
+    public func purge(documentId: Int64) throws {
         try dbWriter.write { db in
             _ = try Document.deleteOne(db, key: documentId)
             try db.execute(sql: "DELETE FROM documentFTS WHERE rowid = ?", arguments: [documentId])
+        }
+    }
+
+    /// Permanently deletes every trashed document. Returns the file hashes that
+    /// are no longer referenced by any remaining document, for storage cleanup.
+    public func emptyTrash() throws -> [String] {
+        try dbWriter.write { db in
+            let trashed = try Document.filter(Column("deletedAt") != nil).fetchAll(db)
+            let ids = trashed.compactMap(\.id)
+            for id in ids {
+                try db.execute(sql: "DELETE FROM documentFTS WHERE rowid = ?", arguments: [id])
+            }
+            try Document.deleteAll(db, keys: ids)
+            // Only hashes no surviving document still uses are safe to delete.
+            let hashes = Set(trashed.compactMap(\.fileHash))
+            return try hashes.filter { hash in
+                try Document.filter(Column("fileHash") == hash).fetchCount(db) == 0
+            }
         }
     }
 
@@ -114,13 +158,71 @@ public final class LibraryRepository: Sendable {
                     sql: """
                         SELECT document.* FROM document
                         JOIN collectionDocument ON collectionDocument.documentId = document.id
-                        WHERE collectionDocument.collectionId = ?
+                        WHERE collectionDocument.collectionId = ? AND document.deletedAt IS NULL
                         ORDER BY document.addedAt DESC
                         """,
                     arguments: [collectionId])
             } else {
-                docs = try Document.order(Column("addedAt").desc).fetchAll(db)
+                docs = try Document
+                    .filter(Column("deletedAt") == nil)
+                    .order(Column("addedAt").desc)
+                    .fetchAll(db)
             }
+            return try docs.map { doc in
+                DocumentDetails(
+                    document: doc,
+                    authors: try Self.fetchAuthors(db, documentId: doc.id!),
+                    tags: try Self.fetchTags(db, documentId: doc.id!)
+                )
+            }
+        }
+    }
+
+    /// Documents added on or after the given date, newest first.
+    public func recentDocuments(since date: Date) throws -> [DocumentDetails] {
+        try dbWriter.read { db in
+            let docs = try Document
+                .filter(Column("addedAt") >= date && Column("deletedAt") == nil)
+                .order(Column("addedAt").desc)
+                .fetchAll(db)
+            return try docs.map { doc in
+                DocumentDetails(
+                    document: doc,
+                    authors: try Self.fetchAuthors(db, documentId: doc.id!),
+                    tags: try Self.fetchTags(db, documentId: doc.id!)
+                )
+            }
+        }
+    }
+
+    /// Documents that belong to no collection, newest first.
+    public func uncategorizedDocuments() throws -> [DocumentDetails] {
+        try dbWriter.read { db in
+            let docs = try Document.fetchAll(
+                db,
+                sql: """
+                    SELECT document.* FROM document
+                    WHERE document.id NOT IN (SELECT documentId FROM collectionDocument)
+                    AND document.deletedAt IS NULL
+                    ORDER BY document.addedAt DESC
+                    """)
+            return try docs.map { doc in
+                DocumentDetails(
+                    document: doc,
+                    authors: try Self.fetchAuthors(db, documentId: doc.id!),
+                    tags: try Self.fetchTags(db, documentId: doc.id!)
+                )
+            }
+        }
+    }
+
+    /// Trashed documents, most recently deleted first.
+    public func trashedDocuments() throws -> [DocumentDetails] {
+        try dbWriter.read { db in
+            let docs = try Document
+                .filter(Column("deletedAt") != nil)
+                .order(Column("deletedAt").desc)
+                .fetchAll(db)
             return try docs.map { doc in
                 DocumentDetails(
                     document: doc,
@@ -159,7 +261,7 @@ public final class LibraryRepository: Sendable {
                 sql: """
                     SELECT document.* FROM document
                     JOIN documentFTS ON documentFTS.rowid = document.id
-                    WHERE documentFTS MATCH ?
+                    WHERE documentFTS MATCH ? AND document.deletedAt IS NULL
                     ORDER BY rank
                     """,
                 arguments: [pattern])
@@ -267,7 +369,7 @@ public final class LibraryRepository: Sendable {
                 sql: """
                     SELECT document.* FROM document
                     JOIN documentTag ON documentTag.documentId = document.id
-                    WHERE documentTag.tagId = ?
+                    WHERE documentTag.tagId = ? AND document.deletedAt IS NULL
                     ORDER BY document.addedAt DESC
                     """,
                 arguments: [tagId])
@@ -327,6 +429,28 @@ public final class LibraryRepository: Sendable {
                 try ColorLabel(documentId: documentId, colorHex: colorHex, label: label)
                     .upsert(db)
             }
+        }
+    }
+
+    // MARK: - Maintenance & stats
+
+    /// Every file hash referenced by a document, including trashed ones.
+    public func referencedFileHashes() throws -> Set<String> {
+        try dbWriter.read { db in
+            Set(try String.fetchAll(
+                db, sql: "SELECT fileHash FROM document WHERE fileHash IS NOT NULL"))
+        }
+    }
+
+    /// Counts for the library stats pane.
+    public func counts() throws -> (live: Int, trashed: Int, withPDF: Int) {
+        try dbWriter.read { db in
+            let live = try Document.filter(Column("deletedAt") == nil).fetchCount(db)
+            let trashed = try Document.filter(Column("deletedAt") != nil).fetchCount(db)
+            let withPDF = try Document
+                .filter(Column("deletedAt") == nil && Column("fileHash") != nil)
+                .fetchCount(db)
+            return (live, trashed, withPDF)
         }
     }
 

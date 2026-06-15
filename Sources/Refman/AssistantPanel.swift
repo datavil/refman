@@ -1,5 +1,5 @@
 import Foundation
-import RefManCore
+import RefmanCore
 import SwiftUI
 
 struct ChatMessage: Identifiable, Equatable {
@@ -96,7 +96,7 @@ final class AssistantModel: ObservableObject {
     }
 
     /// Agent from Settings, falling back to the bundled refman-agent
-    /// (which sits next to the RefMan binary — both built by SPM).
+    /// (which sits next to the Refman binary — both built by SPM).
     private static var agentURL: URL {
         let custom = UserDefaults.standard.string(forKey: SettingsKeys.agentPath) ?? ""
         if !custom.isEmpty {
@@ -115,6 +115,9 @@ final class AssistantModel: ObservableObject {
         if provider == "claude" {
             let model = defaults.string(forKey: SettingsKeys.claudeModel) ?? ""
             if !model.isEmpty { environment["REFMAN_CLAUDE_MODEL"] = model }
+        } else if provider == "openai" {
+            let model = defaults.string(forKey: SettingsKeys.openaiModel) ?? ""
+            if !model.isEmpty { environment["REFMAN_OPENAI_MODEL"] = model }
         } else {
             let model = defaults.string(forKey: SettingsKeys.ollamaModel) ?? ""
             if !model.isEmpty { environment["REFMAN_OLLAMA_MODEL"] = model }
@@ -161,6 +164,9 @@ final class AssistantModel: ObservableObject {
                 } else if provider == "claude" {
                     hint =
                         "Make sure the Claude Code CLI is installed and logged in (run `claude` in Terminal)."
+                } else if provider == "openai" {
+                    hint =
+                        "Make sure the Codex CLI is installed and signed in (run `codex login` in Terminal)."
                 } else {
                     hint =
                         "Make sure Ollama is running (`ollama serve`) and a model is pulled (`ollama pull llama3.2`)."
@@ -251,6 +257,7 @@ struct AssistantPanel: View {
     @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
     @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
     @AppStorage(SettingsKeys.claudeModel) private var claudeModel = ""
+    @AppStorage(SettingsKeys.openaiModel) private var openaiModel = ""
 
     init(
         documentId: Int64,
@@ -371,6 +378,9 @@ struct AssistantPanel: View {
             restartAssistant()
         }
         .onChange(of: claudeModel) {
+            restartAssistant()
+        }
+        .onChange(of: openaiModel) {
             restartAssistant()
         }
         .onDisappear {

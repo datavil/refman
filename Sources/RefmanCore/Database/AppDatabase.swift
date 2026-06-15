@@ -140,6 +140,13 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v4") { db in
+            // Soft delete: trashed documents keep a timestamp; nil means live.
+            try db.alter(table: "document") { t in
+                t.add(column: "deletedAt", .datetime)
+            }
+        }
+
         return migrator
     }
 }

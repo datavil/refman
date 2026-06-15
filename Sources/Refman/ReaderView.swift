@@ -1,5 +1,5 @@
 import PDFKit
-import RefManCore
+import RefmanCore
 import SwiftUI
 
 /// PDF reading window: viewer, annotation toolbar, annotation sidebar, assistant.
@@ -116,6 +116,21 @@ struct ReaderView: View {
                 }
             }
         }
+        .background {
+            // Scoped to this reader window, so it doesn't override text-field
+            // undo elsewhere; disabled when there's nothing to act on, letting
+            // the shortcut fall through.
+            Button(action: reader.undo) {}
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!reader.canUndo)
+                .opacity(0)
+                .allowsHitTesting(false)
+            Button(action: reader.redo) {}
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!reader.canRedo)
+                .opacity(0)
+                .allowsHitTesting(false)
+        }
         .onAppear {
             reader.load(documentId: documentId, model: model)
         }
@@ -173,7 +188,7 @@ enum AnnotationOptions {
 /// Owns the PDFDocument, mirrors annotations to the repository, persists the PDF.
 @MainActor
 final class ReaderModel: ObservableObject {
-    @Published var annotations: [RefManCore.Annotation] = []
+    @Published var annotations: [RefmanCore.Annotation] = []
     @Published var hasSelection = false
     @Published var title = "Reader"
     /// Selection bounds in the PDFView's SwiftUI (top-left) coordinates,
@@ -185,7 +200,7 @@ final class ReaderModel: ObservableObject {
     @Published var aiActionRequest: AssistantAction?
     /// Annotation the user clicked in the PDF, with its view-space rect,
     /// for the floating remove button.
-    @Published var clickedAnnotation: RefManCore.Annotation?
+    @Published var clickedAnnotation: RefmanCore.Annotation?
     @Published var clickedAnnotationRect: CGRect?
     /// Index of the page currently in view, for the sidebar's follow-page mode.
     @Published var currentPageIndex = 0
@@ -194,6 +209,17 @@ final class ReaderModel: ObservableObject {
     /// When on, finishing a text selection immediately applies a highlight.
     @Published var highlighterMode = false
     @Published var highlighterColorHex = AnnotationOptions.colors[0].hex
+    /// Whether there's a markup action that Cmd+Z / Cmd+Shift+Z can act on.
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+
+    /// A reversible markup edit, recording what the user did.
+    private enum MarkupAction {
+        case added([RefmanCore.Annotation])  // undo removes them; redo re-adds
+        case removed(RefmanCore.Annotation)  // undo restores it; redo removes again
+    }
+    private var undoStack: [MarkupAction] = []
+    private var redoStack: [MarkupAction] = []
 
     private(set) var pdfDocument: PDFDocument?
     private var fileURL: URL?
@@ -207,7 +233,9 @@ final class ReaderModel: ObservableObject {
 
     /// PDFKit drops the standard `.name` (/NM) key when writing the file,
     /// so annotations are tagged with a custom key that does survive a round trip.
-    private static let uuidKey = PDFAnnotationKey(rawValue: "/RefManUUID")
+    private static let uuidKey = PDFAnnotationKey(rawValue: "/RefmanUUID")
+    /// Older builds tagged annotations with this key; still read for compatibility.
+    private static let legacyUUIDKey = PDFAnnotationKey(rawValue: "/RefManUUID")
 
     func load(documentId: Int64, model: AppModel) {
         self.documentId = documentId
@@ -358,6 +386,7 @@ final class ReaderModel: ObservableObject {
             let doc = pdfDocument, let documentId, let model
         else { return }
 
+        var created: [RefmanCore.Annotation] = []
         for page in selection.pages {
             let pageIndex = doc.index(for: page)
             let uuid = UUID().uuidString
@@ -392,23 +421,94 @@ final class ReaderModel: ObservableObject {
 
             let quadJSON = (try? JSONEncoder().encode(quads))
                 .flatMap { String(data: $0, encoding: .utf8) }
-            let record = RefManCore.Annotation(
+            let record = RefmanCore.Annotation(
                 uuid: uuid, documentId: documentId, pageIndex: pageIndex,
                 kind: kind, colorHex: color.hexString,
                 quadPoints: quadJSON,
                 selectedText: selection.string)
             if let saved = try? model.repository.insert(record) {
                 annotations.append(saved)
+                created.append(saved)
             }
         }
+        if !created.isEmpty { pushUndo(.added(created)) }
         annotations.sort { ($0.pageIndex, $0.createdAt) < ($1.pageIndex, $1.createdAt) }
         view.clearSelection()
         savePDF()
     }
 
+    // MARK: - Undo / redo
+
+    func undo() {
+        guard let action = undoStack.popLast() else { return }
+        switch action {
+        case .added(let records): records.forEach(removeAnnotation)
+        case .removed(let record): restoreAnnotation(record)
+        }
+        redoStack.append(action)
+        refreshUndoRedo()
+    }
+
+    func redo() {
+        guard let action = redoStack.popLast() else { return }
+        switch action {
+        case .added(let records): records.forEach(restoreAnnotation)
+        case .removed(let record): removeAnnotation(record)
+        }
+        undoStack.append(action)
+        refreshUndoRedo()
+    }
+
+    /// Records a fresh user edit, which invalidates the redo history.
+    private func pushUndo(_ action: MarkupAction) {
+        undoStack.append(action)
+        redoStack.removeAll()
+        refreshUndoRedo()
+    }
+
+    private func refreshUndoRedo() {
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+
+    /// Recreates a previously removed markup on the page and in the database.
+    private func restoreAnnotation(_ annotation: RefmanCore.Annotation) {
+        guard let model, let doc = pdfDocument,
+            let page = doc.page(at: annotation.pageIndex),
+            let json = annotation.quadPoints?.data(using: .utf8),
+            let quads = try? JSONDecoder().decode([[Double]].self, from: json),
+            !quads.isEmpty
+        else { return }
+
+        let xs = quads.flatMap { quad in stride(from: 0, to: quad.count, by: 2).map { quad[$0] } }
+        let ys = quads.flatMap { quad in stride(from: 1, to: quad.count, by: 2).map { quad[$0] } }
+        let union = CGRect(
+            x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        let subtype: PDFAnnotationSubtype = annotation.kind == .underline ? .underline : .highlight
+
+        let pdfAnnotation = PDFAnnotation(bounds: union, forType: subtype, withProperties: nil)
+        pdfAnnotation.color = NSColor(hex: annotation.colorHex) ?? .systemYellow
+        pdfAnnotation.quadrilateralPoints = quads.flatMap { quad in
+            stride(from: 0, to: quad.count, by: 2).map { i in
+                NSValue(point: NSPoint(x: quad[i] - union.minX, y: quad[i + 1] - union.minY))
+            }
+        }
+        pdfAnnotation.setValue(annotation.uuid as NSString, forAnnotationKey: Self.uuidKey)
+        if let note = annotation.noteText { pdfAnnotation.contents = note }
+        page.addAnnotation(pdfAnnotation)
+
+        var record = annotation
+        record.id = nil  // fresh rowid; the uuid is what we match on
+        if let saved = try? model.repository.insert(record) {
+            annotations.append(saved)
+            annotations.sort { ($0.pageIndex, $0.createdAt) < ($1.pageIndex, $1.createdAt) }
+        }
+        savePDF()
+    }
+
     // MARK: - Annotation actions
 
-    func jump(to annotation: RefManCore.Annotation) {
+    func jump(to annotation: RefmanCore.Annotation) {
         guard let doc = pdfDocument, let page = doc.page(at: annotation.pageIndex) else { return }
         if let target = pdfAnnotation(for: annotation, on: page) {
             pdfView?.go(to: target.bounds, on: page)
@@ -417,7 +517,7 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    func setNote(_ text: String, for annotation: RefManCore.Annotation) {
+    func setNote(_ text: String, for annotation: RefmanCore.Annotation) {
         guard let model, let documentId else { return }
         var updated = annotation
         updated.noteText = text
@@ -447,7 +547,15 @@ final class ReaderModel: ObservableObject {
         delete(record)
     }
 
-    func delete(_ annotation: RefManCore.Annotation) {
+    /// User-initiated removal: reversible via undo.
+    func delete(_ annotation: RefmanCore.Annotation) {
+        removeAnnotation(annotation)
+        pushUndo(.removed(annotation))
+    }
+
+    /// Removes a markup from the page and database without touching the
+    /// undo/redo history (used by undo/redo themselves).
+    private func removeAnnotation(_ annotation: RefmanCore.Annotation) {
         guard let model else { return }
         if let doc = pdfDocument, let page = doc.page(at: annotation.pageIndex),
             let pdfAnn = pdfAnnotation(for: annotation, on: page)
@@ -464,10 +572,12 @@ final class ReaderModel: ObservableObject {
     }
 
     private func pdfAnnotation(
-        for annotation: RefManCore.Annotation, on page: PDFPage
+        for annotation: RefmanCore.Annotation, on page: PDFPage
     ) -> PDFAnnotation? {
         if let match = page.annotations.first(where: {
-            ($0.value(forAnnotationKey: Self.uuidKey) as? String) == annotation.uuid
+            let value = ($0.value(forAnnotationKey: Self.uuidKey) as? String)
+                ?? ($0.value(forAnnotationKey: Self.legacyUUIDKey) as? String)
+            return value == annotation.uuid
         }) {
             return match
         }
@@ -726,7 +836,7 @@ struct SelectionPen: View {
 /// Floating action shown when the user clicks an existing highlight/underline.
 struct AnnotationBubble: View {
     @ObservedObject var reader: ReaderModel
-    let annotation: RefManCore.Annotation
+    let annotation: RefmanCore.Annotation
 
     var body: some View {
         Button {
@@ -766,7 +876,7 @@ struct AnnotationSidebar: View {
         }
     }
 
-    private var filteredAnnotations: [RefManCore.Annotation] {
+    private var filteredAnnotations: [RefmanCore.Annotation] {
         colorFilter.isEmpty
             ? reader.annotations
             : reader.annotations.filter { colorFilter.contains($0.colorHex) }
@@ -877,11 +987,11 @@ struct AnnotationSidebar: View {
 
 struct AnnotationRow: View {
     @ObservedObject var reader: ReaderModel
-    let annotation: RefManCore.Annotation
+    let annotation: RefmanCore.Annotation
     @State private var noteText: String
     @State private var editingNote: Bool
 
-    init(reader: ReaderModel, annotation: RefManCore.Annotation) {
+    init(reader: ReaderModel, annotation: RefmanCore.Annotation) {
         self.reader = reader
         self.annotation = annotation
         let note = annotation.noteText ?? ""

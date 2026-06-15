@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="RefMan"
-PRODUCT_NAME="RefMan"
+APP_NAME="Refman"
+PRODUCT_NAME="Refman"
 AGENT_NAME="refman-agent"
 CONFIGURATION="${CONFIGURATION:-release}"
-BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-app.refman.RefMan}"
+BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-app.refman.Refman}"
 VERSION="${VERSION:-0.1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"

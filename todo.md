@@ -1,10 +1,10 @@
-# RefMan — build todo
+# Refman — build todo
 
 Native macOS reference manager (Mendeley-class). Swift + SwiftUI, GRDB, PDFKit,
-CloudKit sync, ACP for local-LLM assistant. SPM-based (`swift build` / `swift run RefMan`).
+CloudKit sync, ACP for local-LLM assistant. SPM-based (`swift build` / `swift run Refman`).
 
 ## Phase 0 — Skeleton ✅
-- [x] SPM workspace: `RefManCore` (library), `RefMan` (SwiftUI executable), `refman-agent`, tests
+- [x] SPM workspace: `RefmanCore` (library), `Refman` (SwiftUI executable), `refman-agent`, tests
 - [x] GRDB dependency, schema v1 migrations: document, author, documentAuthor,
       collection, collectionDocument, tag, documentTag, annotation, documentFTS (FTS5)
 - [x] `LibraryStore` (content-addressed PDF storage by sha256)
@@ -34,8 +34,8 @@ CloudKit sync, ACP for local-LLM assistant. SPM-based (`swift build` / `swift ru
 
 ## Phase 4 — Sync (CloudKit) — NOT STARTED
 - [ ] Requires an Xcode app target + Apple Developer signing + CloudKit entitlements;
-      SPM executables can't carry entitlements. Plan: wrap RefMan in an .xcodeproj
-      app shell, add CKSyncEngine adapter behind a protocol in RefManCore.
+      SPM executables can't carry entitlements. Plan: wrap Refman in an .xcodeproj
+      app shell, add CKSyncEngine adapter behind a protocol in RefmanCore.
 - [ ] documents/annotations/collections/tags as CKRecords; PDFs as CKAsset
 - [ ] Conflict policy: LWW per field; annotations append-mostly
 - Schema is sync-ready: every syncable row carries a `uuid`; files are content-addressed.

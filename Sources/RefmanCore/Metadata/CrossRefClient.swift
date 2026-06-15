@@ -19,7 +19,7 @@ public struct CrossRefClient: Sendable {
             components.queryItems = [URLQueryItem(name: "mailto", value: mailto)]
         }
         var request = URLRequest(url: components.url!)
-        request.setValue("RefMan/0.1 (mailto:\(mailto ?? "unknown"))", forHTTPHeaderField: "User-Agent")
+        request.setValue("Refman/0.1 (mailto:\(mailto ?? "unknown"))", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { return nil }
@@ -32,7 +32,9 @@ public struct CrossRefClient: Sendable {
     }
 
     static func record(from work: Work) -> MetadataRecord {
-        let title = work.title?.first ?? ""
+        // Titles can carry inline JATS markup (e.g. <sup>) and pretty-print
+        // whitespace, just like abstracts.
+        let title = work.title?.first.map(Self.stripJATS) ?? ""
         let authors = (work.author ?? []).map { (given: $0.given ?? "", family: $0.family ?? "") }
         let year = work.issued?.dateParts?.first?.first ?? work.published?.dateParts?.first?.first
 
@@ -63,9 +65,11 @@ public struct CrossRefClient: Sendable {
         )
     }
 
-    /// CrossRef abstracts arrive as JATS XML; strip the tags.
+    /// CrossRef text arrives as JATS XML; strip the tags and collapse the
+    /// whitespace runs left behind by pretty-printing.
     static func stripJATS(_ s: String) -> String {
         s.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

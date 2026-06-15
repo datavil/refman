@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(cat)",
-      "Bash(swiftc -o /tmp/icon_preview Sources/RefMan/AppIcon.swift /tmp/icon_preview_main.swift)",
+      "Bash(swiftc -o /tmp/icon_preview Sources/Refman/AppIcon.swift /tmp/icon_preview_main.swift)",
       "Bash(/tmp/icon_preview)",
       "Read(//tmp/refman-verify/**)",
       "Read(//private/tmp/refman-verify/**)",
@@ -13,7 +13,21 @@
       "Bash(python3 -c ' *)",
       "Bash(ps -p 35035 -o pid,ppid,etime,command)",
       "Bash(python3 -c \"import yaml,sys; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); print\\('YAML OK'\\)\")",
-      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); print\\('YAML OK'\\)\")"
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/ci.yml'\\)\\); print\\('YAML OK'\\)\")",
+      "Bash(curl -s --max-time 20 \"https://api.unpaywall.org/v2/10.1016/j.cell.2026.04.022?email=refman@example.com\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('is_oa:', d.get\\('is_oa'\\)\\); loc=d.get\\('best_oa_location'\\); print\\('pdf:', loc.get\\('url_for_pdf'\\) if loc else None\\); print\\('title:', \\(d.get\\('title'\\) or ''\\)[:60]\\)\")",
+      "Bash(curl -s --max-time 20 \"https://api.crossref.org/works/10.1016/j.cell.2026.04.022\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s --max-time 20 \"https://api.unpaywall.org/v2/10.1016/j.cell.2026.04.022?email=zafermolbio@gmail.com\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('is_oa:', d.get\\('is_oa'\\)\\); loc=d.get\\('best_oa_location'\\); print\\('oa_pdf:', loc.get\\('url_for_pdf'\\) if loc else None\\); print\\('title:', \\(d.get\\('title'\\) or ''\\)[:70]\\)\")",
+      "Bash(curl -s --max-time 20 \"https://api.crossref.org/works/10.1016/j.cell.2026.04.022\")",
+      "Bash(python3 -c \"import sys,json; m=json.load\\(sys.stdin\\)['message']; print\\('title:', \\(m.get\\('title'\\) or ['']\\)[0][:70]\\); print\\('links:', [\\(l.get\\('content-type'\\), l.get\\('URL'\\)\\) for l in m.get\\('link',[]\\)]\\)\")",
+      "Bash(curl -s --max-time 20 \"https://api.unpaywall.org/v2/10.1371/journal.pone.0000217?email=zafermolbio@gmail.com\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\([l.get\\('url_for_pdf'\\) for l in d.get\\('oa_locations',[]\\)][:3]\\)\")",
+      "Bash(curl -sL --max-time 30 -A \"Refman/0.1\" \"https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0000217&type=printable\" -o /tmp/t.pdf -w \"http=%{http_code} type=%{content_type} size=%{size_download}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(xxd)",
+      "Bash(git mv *)",
+      "Bash(awk -F/ '{print $1\"/\"$2}')"
     ]
   }
 }

@@ -5,20 +5,20 @@
             "request": "launch",
             "args": [],
             "cwd": "${workspaceFolder:refman}",
-            "name": "Debug RefMan",
-            "target": "RefMan",
+            "name": "Debug Refman",
+            "target": "Refman",
             "configuration": "debug",
-            "preLaunchTask": "swift: Build Debug RefMan"
+            "preLaunchTask": "swift: Build Debug Refman"
         },
         {
             "type": "swift",
             "request": "launch",
             "args": [],
             "cwd": "${workspaceFolder:refman}",
-            "name": "Release RefMan",
-            "target": "RefMan",
+            "name": "Release Refman",
+            "target": "Refman",
             "configuration": "release",
-            "preLaunchTask": "swift: Build Release RefMan"
+            "preLaunchTask": "swift: Build Release Refman"
         },
         {
             "type": "swift",
@@ -39,6 +39,26 @@
             "target": "refman-agent",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release refman-agent"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:refman}",
+            "name": "Debug Refman",
+            "target": "Refman",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Refman"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:refman}",
+            "name": "Release Refman",
+            "target": "Refman",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Refman"
         }
     ]
 }

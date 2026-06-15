@@ -106,13 +106,9 @@ public enum BibTeX {
         return entries
     }
 
-    /// Collapses whitespace and strips protective braces.
+    /// Decodes LaTeX/HTML escapes, collapses whitespace, strips protective braces.
     static func normalize(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: "{", with: "")
-            .replacingOccurrences(of: "}", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        TextDecoding.clean(value)
     }
 
     /// Converts a parsed entry into a document + authors.

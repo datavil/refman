@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import RefManCore
+@testable import RefmanCore
 
 @Suite struct DatabaseTests {
     func makeRepo() throws -> LibraryRepository {
@@ -44,15 +44,52 @@ import Testing
         #expect(try repo.search("neural").first?.document.title == "New title")
     }
 
-    @Test func deleteCascades() throws {
+    @Test func deleteTrashesThenPurgeCascades() throws {
         let repo = try makeRepo()
         let details = try repo.insert(Document(title: "Doomed"), fullText: "doomed body")
         let id = details.id
         try repo.insert(Annotation(documentId: id, pageIndex: 0, kind: .highlight))
+
+        // Soft delete moves it to the Trash: hidden from listings/search, recoverable.
         try repo.delete(documentId: id)
+        #expect(try repo.allDocuments().isEmpty)
+        #expect(try repo.search("doomed").isEmpty)
+        #expect(try repo.trashedDocuments().map(\.id) == [id])
+
+        // Restore brings it back into the library.
+        try repo.restore(documentId: id)
+        #expect(try repo.allDocuments().map(\.id) == [id])
+
+        // Emptying the Trash purges it and cascades annotations + FTS.
+        try repo.delete(documentId: id)
+        _ = try repo.emptyTrash()
         #expect(try repo.document(id: id) == nil)
         #expect(try repo.annotations(documentId: id).isEmpty)
         #expect(try repo.search("doomed").isEmpty)
+    }
+
+    @Test func countsAndReferencedHashesTrackTrash() throws {
+        let repo = try makeRepo()
+        let a = try repo.insert(Document(title: "A", fileHash: "hashA"))
+        _ = try repo.insert(Document(title: "B", fileHash: "hashB"))
+        _ = try repo.insert(Document(title: "C"))  // no PDF
+
+        var counts = try repo.counts()
+        #expect(counts.live == 3)
+        #expect(counts.withPDF == 2)
+        #expect(counts.trashed == 0)
+        #expect(try repo.referencedFileHashes() == Set(["hashA", "hashB"]))
+
+        try repo.delete(documentId: a.id)
+        counts = try repo.counts()
+        #expect(counts.live == 2)
+        #expect(counts.trashed == 1)
+        // Trashed documents still reference their file until the Trash is emptied.
+        #expect(try repo.referencedFileHashes() == Set(["hashA", "hashB"]))
+
+        let freed = try repo.emptyTrash()
+        #expect(freed == ["hashA"])
+        #expect(try repo.referencedFileHashes() == Set(["hashB"]))
     }
 
     @Test func searchMatchesTitleAuthorsAndBody() throws {

@@ -30,11 +30,13 @@ public struct MetadataRecord: Equatable, Sendable {
         url: String? = nil
     ) {
         self.type = type
-        self.title = title
-        self.abstract = abstract
-        self.authors = authors
+        self.title = TextDecoding.clean(title)
+        self.abstract = abstract.map(TextDecoding.clean)
+        self.authors = authors.map {
+            (given: TextDecoding.clean($0.given), family: TextDecoding.clean($0.family))
+        }
         self.year = year
-        self.venue = venue
+        self.venue = venue.map(TextDecoding.clean)
         self.volume = volume
         self.issue = issue
         self.pages = pages
