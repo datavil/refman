@@ -1,6 +1,15 @@
-# Refman
+<p align="center">
+  <img src="assets/logo.svg" width="128" alt="Refman logo">
+</p>
 
-A native macOS reference manager (Mendeley-style), built with Swift.
+<h1 align="center">Refman</h1>
+
+<p align="center">A native macOS reference manager (Mendeley-style), built with Swift.</p>
+
+> 🤖 **Vibecoded with Claude.** This project is written end-to-end by
+> [Claude](https://claude.com) (Anthropic) via Claude Code — every line of code,
+> from the database layer to the SwiftUI app to this README, produced by AI from
+> natural-language prompts. No line was hand-written. Enjoy it for what it is.
 
 - **Library**: SQLite (GRDB) with FTS5 full-text search; PDFs stored
   content-addressed by sha256 under `~/Library/Application Support/Refman/Storage`.
@@ -36,12 +45,16 @@ the Assistant. The script ad-hoc signs the app for local use; set
 `SKIP_CODESIGN=1` to skip signing.
 
 Because Refman isn't signed with an Apple Developer ID, macOS Gatekeeper blocks
-it on first launch ("Apple cannot check it for malicious software"). Open it
-once via right-click → **Open**, or clear the quarantine flag:
+it on first launch ("Apple could not verify… is free of malware"). Clear the
+quarantine flag once (sudo is needed because the app files aren't owned by your
+user), then open it normally:
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/Refman.app
+sudo xattr -dr com.apple.quarantine /Applications/Refman.app
 ```
+
+After the first install, the app updates itself: **Refman → Check for Updates…**
+pulls the latest GitHub release and relaunches, no quarantine step needed.
 
 ## Test
 
