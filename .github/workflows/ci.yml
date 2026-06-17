@@ -52,10 +52,11 @@ jobs:
 
           Refman is not signed with an Apple Developer ID, so macOS Gatekeeper
           blocks it on first launch ("Apple could not verify… is free of
-          malware"). To open it, run this once in Terminal:
+          malware"). To open it, run this once in Terminal (sudo is needed
+          because the app files aren't owned by your user):
 
           ```
-          xattr -dr com.apple.quarantine /Applications/Refman.app
+          sudo xattr -dr com.apple.quarantine /Applications/Refman.app
           ```
 
           Then open Refman normally. (Alternatively, try launching it once, then
