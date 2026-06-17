@@ -409,6 +409,11 @@ struct LibraryView: View {
                     Button("Fetch PDF") { model.fetchPDF(id: id) }
                     Button("Refresh Metadata") { model.refreshMetadata(id: id) }
                     Divider()
+                    Button("Summarize") { model.generateInsight(.summary, for: id) }
+                    Button("Key Points") { model.generateInsight(.keyPoints, for: id) }
+                    Button("Methods") { model.generateInsight(.methods, for: id) }
+                    Button("Limitations") { model.generateInsight(.limitations, for: id) }
+                    Divider()
                     if model.documents.first(where: { $0.id == id })?.document.isReading == true {
                         Button("Remove from Currently Reading") { model.clearReading() }
                     } else {

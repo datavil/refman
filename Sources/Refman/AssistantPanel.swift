@@ -15,6 +15,8 @@ struct AssistantAction: Identifiable, Equatable {
     let id = UUID()
     let label: String
     let prompt: String
+    /// When set, the assistant's reply is stored in this insight field.
+    var saves: DocumentInsight?
 }
 
 /// Built-in prompts behind the quick-action buttons.
@@ -24,28 +26,40 @@ enum AssistantPrompts {
         AssistantAction(
             label: "Summarize",
             prompt: """
-                Summarize the currently open paper using its full text. Cover the problem it \
-                addresses, the approach taken, and the main findings in 2–4 short paragraphs. \
-                Be concise and avoid filler.
-                """),
+                Summarize the currently open paper using its full text in 2–4 short paragraphs: \
+                the problem, the approach, and the main findings. State the substance directly. \
+                Do NOT use narrative framing such as "the paper addresses", "the authors/they \
+                developed", "this study shows", "we propose". Write the actual problem, method, \
+                and results, not a description of the paper describing them. Be concise and \
+                avoid filler.
+                """,
+            saves: .summary),
         AssistantAction(
             label: "Key points",
             prompt: """
                 List the key points and main contributions of the currently open paper as 5–8 \
-                concise bullet points, based on its full text.
-                """),
+                concise bullet points, based on its full text. State each point directly as a \
+                fact or result. Do NOT use narrative framing such as "the paper", "the \
+                authors/they", "this study", "we" — write the substance itself, not a \
+                description of the paper.
+                """,
+            saves: .keyPoints),
         AssistantAction(
             label: "Methods",
             prompt: """
                 Explain the methods and experimental setup of the currently open paper, based \
-                on its full text. Be specific and concise.
-                """),
+                on its full text. State the substance directly, without narrative framing like \
+                "the paper" or "the authors". Be specific and concise.
+                """,
+            saves: .methods),
         AssistantAction(
             label: "Limitations",
             prompt: """
                 Identify the main limitations, assumptions, and open questions of the currently \
-                open paper, based on its full text. Be concise.
-                """),
+                open paper, based on its full text. State each directly, without narrative \
+                framing like "the paper" or "the authors". Be concise.
+                """,
+            saves: .limitations),
     ]
 
     static func summarize(_ passage: String) -> AssistantAction {
@@ -76,6 +90,24 @@ enum AssistantPrompts {
     }
 }
 
+/// Collects streamed chunks from the agent's reading thread, safely.
+final class ChunkAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = ""
+
+    func append(_ chunk: String) {
+        lock.lock()
+        buffer += chunk
+        lock.unlock()
+    }
+
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer
+    }
+}
+
 /// Drives one ACP session against refman-agent, exposing library tools.
 @MainActor
 final class AssistantModel: ObservableObject {
@@ -90,9 +122,21 @@ final class AssistantModel: ObservableObject {
     private let documentId: Int64
     private let repository: LibraryRepository
 
+    /// The provider the live client is bound to, and the stashed conversation
+    /// for every other provider — so switching agents never loses a chat.
+    private var provider = AssistantModel.currentProvider()
+    private var conversations: [String: [ChatMessage]] = [:]
+
+    /// Called after a generated insight is stored, so the UI can refresh.
+    var onInsightSaved: (() -> Void)?
+
     init(documentId: Int64, repository: LibraryRepository) {
         self.documentId = documentId
         self.repository = repository
+    }
+
+    private static func currentProvider() -> String {
+        UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) ?? "ollama"
     }
 
     /// Agent from Settings, falling back to the bundled refman-agent
@@ -149,11 +193,14 @@ final class AssistantModel: ObservableObject {
             do {
                 try await client.start()
                 started = true
-                messages.append(
-                    ChatMessage(
-                        role: .assistant,
-                        text: "Hi! Ask me about this paper or your library. I can search, read full text, and see your annotations."
-                    ))
+                // Greet only on a fresh conversation, not when restoring one.
+                if messages.isEmpty {
+                    messages.append(
+                        ChatMessage(
+                            role: .assistant,
+                            text: "Hi! Ask me about this paper or your library. I can search, read full text, and see your annotations."
+                        ))
+                }
             } catch {
                 let customAgentPath = UserDefaults.standard.string(forKey: SettingsKeys.agentPath) ?? ""
                 let provider = UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) ?? "ollama"
@@ -198,11 +245,12 @@ final class AssistantModel: ObservableObject {
     private func flushQueue() {
         guard let action = queued, started, client != nil, !isBusy else { return }
         queued = nil
-        submit(display: action.label, prompt: action.prompt)
+        submit(display: action.label, prompt: action.prompt, saves: action.saves)
     }
 
     /// Posts `display` as the outgoing message while sending `prompt` to the agent.
-    private func submit(display: String, prompt: String) {
+    /// When `saves` is set, the completed reply is stored in that insight field.
+    private func submit(display: String, prompt: String, saves: DocumentInsight? = nil) {
         guard let client, !isBusy else { return }
         messages.append(ChatMessage(role: .user, text: display))
         messages.append(ChatMessage(role: .assistant, text: ""))
@@ -214,6 +262,14 @@ final class AssistantModel: ObservableObject {
                 try await client.prompt(prompt) { chunk in
                     Task { @MainActor in
                         self.messages[index].text += chunk
+                    }
+                }
+                if let saves {
+                    let text = messages[index].text
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        try? repository.setInsight(saves, documentId: documentId, text: text)
+                        onInsightSaved?()
                     }
                 }
             } catch {
@@ -228,6 +284,55 @@ final class AssistantModel: ObservableObject {
     func shutdown() {
         client?.stop()
         client = nil
+        started = false
+    }
+
+    /// Re-reads the provider/model from Settings and rebinds the agent. When the
+    /// provider changes, the current conversation is stashed and the new
+    /// provider's stored conversation (if any) is restored, so switching agents
+    /// never loses a chat.
+    func applySettingsChange() {
+        guard !isBusy else { return }
+        let newProvider = AssistantModel.currentProvider()
+        if newProvider != provider {
+            conversations[provider] = messages
+            provider = newProvider
+            messages = conversations[newProvider] ?? []
+        }
+        shutdown()
+        startIfNeeded()
+    }
+
+    /// Clears the current agent's chat and resets its session.
+    func clearChat() {
+        guard !isBusy else { return }
+        messages = []
+        conversations[provider] = []
+        shutdown()
+        startIfNeeded()
+    }
+
+    /// Runs one prompt against the document headlessly (no chat UI) and returns
+    /// the generated text. Used by the library's AI insight commands.
+    static func generateText(prompt: String, documentId: Int64, repository: LibraryRepository)
+        async throws -> String
+    {
+        var environment = agentEnvironment
+        environment["REFMAN_DOCUMENT_ID"] = String(documentId)
+        if let dbPath = repository.database.path {
+            environment["REFMAN_DB_PATH"] = dbPath
+        }
+        let client = ACPClient(agentURL: agentURL, environment: environment) { name, arguments in
+            try await handleTool(
+                name: name, arguments: arguments,
+                repository: repository, currentDocumentId: documentId)
+        }
+        defer { client.stop() }
+        try await client.start()
+
+        let accumulator = ChunkAccumulator()
+        _ = try await client.prompt(prompt) { accumulator.append($0) }
+        return accumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Library tools (called by the agent via refman/toolCall)
@@ -254,6 +359,7 @@ struct AssistantPanel: View {
     @Binding var pendingAction: AssistantAction?
 
     @StateObject private var assistant: AssistantModelBox = AssistantModelBox()
+    @State private var showClearConfirm = false
     @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
     @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
     @AppStorage(SettingsKeys.claudeModel) private var claudeModel = ""
@@ -272,10 +378,36 @@ struct AssistantPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Label("AI", systemImage: "sparkles")
-                    .font(.headline)
+                HStack {
+                    Label("AI", systemImage: "sparkles")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        showClearConfirm = true
+                    } label: {
+                        Label("Clear", systemImage: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("Clear this agent's chat")
+                    .disabled(
+                        (assistant.model?.messages.isEmpty ?? true)
+                            || (assistant.model?.isBusy ?? true))
+                    .confirmationDialog(
+                        "Clear this chat?", isPresented: $showClearConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Clear Chat", role: .destructive) {
+                            assistant.model?.clearChat()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This permanently removes the current agent's conversation.")
+                    }
+                }
                 AssistantProviderPicker(selection: $llmProvider, label: "Agent", compact: true)
                     .controlSize(.small)
+                    .disabled(assistant.model?.isBusy ?? false)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
@@ -363,6 +495,7 @@ struct AssistantPanel: View {
             if assistant.model == nil {
                 assistant.model = AssistantModel(
                     documentId: documentId, repository: model.repository)
+                assistant.model?.onInsightSaved = { [weak model] in model?.reload() }
                 assistant.bind()
             }
             assistant.model?.startIfNeeded()
@@ -372,27 +505,20 @@ struct AssistantPanel: View {
             consumePendingAction()
         }
         .onChange(of: llmProvider) {
-            restartAssistant()
+            assistant.model?.applySettingsChange()
         }
         .onChange(of: ollamaModel) {
-            restartAssistant()
+            assistant.model?.applySettingsChange()
         }
         .onChange(of: claudeModel) {
-            restartAssistant()
+            assistant.model?.applySettingsChange()
         }
         .onChange(of: openaiModel) {
-            restartAssistant()
+            assistant.model?.applySettingsChange()
         }
         .onDisappear {
             assistant.model?.shutdown()
         }
-    }
-
-    private func restartAssistant() {
-        assistant.model?.shutdown()
-        assistant.model = AssistantModel(
-            documentId: documentId, repository: model.repository)
-        assistant.model?.startIfNeeded()
     }
 
     /// Hands a sidebar-triggered action to the model, then clears it.
@@ -440,8 +566,7 @@ struct MessageBubble: View {
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 30) }
-            Text(LocalizedStringKey(message.text.isEmpty ? "…" : message.text))
-                .textSelection(.enabled)
+            content
                 .padding(8)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -451,11 +576,163 @@ struct MessageBubble: View {
         }
     }
 
+    @ViewBuilder
+    private var content: some View {
+        if message.text.isEmpty {
+            // Placeholder until the agent starts streaming a reply.
+            ProgressView().controlSize(.small)
+        } else if message.role == .error {
+            Text(message.text).textSelection(.enabled)
+        } else {
+            MarkdownText(text: message.text).textSelection(.enabled)
+        }
+    }
+
     private var background: AnyShapeStyle {
         switch message.role {
         case .user: return AnyShapeStyle(.blue.opacity(0.18))
         case .assistant: return AnyShapeStyle(.quaternary)
         case .error: return AnyShapeStyle(.red.opacity(0.15))
         }
+    }
+}
+
+/// Renders a useful subset of Markdown (headings, bullet/numbered lists, fenced
+/// code, and inline emphasis). SwiftUI's `Text` only handles inline Markdown, so
+/// block-level constructs are split out here and styled per block.
+struct MarkdownText: View {
+    let text: String
+
+    private enum Block: Hashable {
+        case heading(level: Int, text: String)
+        case paragraph(String)
+        case bullet(String)
+        case numbered(marker: String, text: String)
+        case code(String)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(Self.parse(text).enumerated()), id: \.offset) { _, block in
+                row(for: block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(for block: Block) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(inline(text))
+                .font(level <= 1 ? .title3.bold() : level == 2 ? .headline : .subheadline.bold())
+                .fixedSize(horizontal: false, vertical: true)
+        case .paragraph(let text):
+            Text(inline(text))
+                .fixedSize(horizontal: false, vertical: true)
+        case .bullet(let text):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("•")
+                Text(inline(text)).fixedSize(horizontal: false, vertical: true)
+            }
+        case .numbered(let marker, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(marker).monospacedDigit()
+                Text(inline(text)).fixedSize(horizontal: false, vertical: true)
+            }
+        case .code(let text):
+            Text(text)
+                .font(.system(.callout, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
+        }
+    }
+
+    /// Parses inline Markdown (bold, italic, code, links) for one block.
+    private func inline(_ string: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: string,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(string)
+    }
+
+    private static func parse(_ text: String) -> [Block] {
+        var blocks: [Block] = []
+        var paragraph: [String] = []
+        var code: [String]?
+
+        func flushParagraph() {
+            if !paragraph.isEmpty {
+                blocks.append(.paragraph(paragraph.joined(separator: "\n")))
+                paragraph.removeAll()
+            }
+        }
+
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Fenced code block: toggle on ``` and capture lines verbatim.
+            if trimmed.hasPrefix("```") {
+                if code == nil {
+                    flushParagraph()
+                    code = []
+                } else {
+                    blocks.append(.code((code ?? []).joined(separator: "\n")))
+                    code = nil
+                }
+                continue
+            }
+            if code != nil {
+                code?.append(line)
+                continue
+            }
+
+            if trimmed.isEmpty {
+                flushParagraph()
+            } else if let heading = heading(trimmed) {
+                flushParagraph()
+                blocks.append(.heading(level: heading.0, text: heading.1))
+            } else if let bullet = bullet(trimmed) {
+                flushParagraph()
+                blocks.append(.bullet(bullet))
+            } else if let numbered = numbered(trimmed) {
+                flushParagraph()
+                blocks.append(.numbered(marker: numbered.0, text: numbered.1))
+            } else {
+                paragraph.append(line)
+            }
+        }
+        flushParagraph()
+        if let code { blocks.append(.code(code.joined(separator: "\n"))) }
+        return blocks
+    }
+
+    private static func heading(_ s: String) -> (Int, String)? {
+        var level = 0
+        var idx = s.startIndex
+        while idx < s.endIndex, s[idx] == "#", level < 6 {
+            level += 1
+            idx = s.index(after: idx)
+        }
+        guard level > 0, idx < s.endIndex, s[idx] == " " else { return nil }
+        return (level, String(s[idx...]).trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func bullet(_ s: String) -> String? {
+        for marker in ["- ", "* ", "+ "] where s.hasPrefix(marker) {
+            return String(s.dropFirst(2))
+        }
+        return nil
+    }
+
+    private static func numbered(_ s: String) -> (String, String)? {
+        let digits = s.prefix { $0.isNumber }
+        guard !digits.isEmpty else { return nil }
+        var rest = s[digits.endIndex...]
+        guard let sep = rest.first, sep == "." || sep == ")" else { return nil }
+        rest = rest.dropFirst()
+        guard rest.first == " " else { return nil }
+        return ("\(digits).", String(rest.dropFirst()))
     }
 }

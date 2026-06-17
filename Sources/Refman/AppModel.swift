@@ -333,6 +333,31 @@ final class AppModel: ObservableObject {
 
     // MARK: - Editing
 
+    /// Generates an AI insight (summary, key points, …) for a document and
+    /// stores it on the paper.
+    func generateInsight(_ insight: DocumentInsight, for id: Int64) {
+        guard let details = documents.first(where: { $0.id == id }),
+            let action = AssistantPrompts.document.first(where: { $0.saves == insight })
+        else { return }
+        let title = details.document.title
+        statusMessage = "Generating \(action.label.lowercased()) for “\(title)”…"
+        Task {
+            do {
+                let text = try await AssistantModel.generateText(
+                    prompt: action.prompt, documentId: id, repository: repository)
+                guard !text.isEmpty else {
+                    statusMessage = "\(action.label) came back empty"
+                    return
+                }
+                try repository.setInsight(insight, documentId: id, text: text)
+                reload()
+                statusMessage = "\(action.label) created for “\(title)”"
+            } catch {
+                statusMessage = "\(action.label) failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func update(_ document: Document, authors: [Author]? = nil) {
         do {
             _ = try repository.update(document, authors: authors)

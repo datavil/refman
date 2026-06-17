@@ -52,11 +52,18 @@ struct InspectorView: View {
             }
 
             Section("Abstract") {
-                TextField("Abstract", text: bind(\.abstract), axis: .vertical)
-                    .lineLimit(3...12)
-                    .multilineTextAlignment(.leading)
-                    .labelsHidden()
+                ScrollableMaxHeight(maxHeight: 220) {
+                    TextField("Abstract", text: bind(\.abstract), axis: .vertical)
+                        .lineLimit(3...)
+                        .multilineTextAlignment(.leading)
+                        .labelsHidden()
+                }
             }
+
+            insightSection("Summary", \.summary, action: "Summarize")
+            insightSection("Key Points", \.keyPoints, action: "Key Points")
+            insightSection("Methods", \.methods, action: "Methods")
+            insightSection("Limitations", \.limitations, action: "Limitations")
 
             Section("Tags") {
                 if !details.tags.isEmpty {
@@ -84,6 +91,35 @@ struct InspectorView: View {
             }
         }
         .formStyle(.grouped)
+        // Insights are generated elsewhere (the AI panel or library menu); keep
+        // the editable draft in sync so saving metadata edits never clobbers them.
+        .onChange(of: details.document) {
+            draft.summary = details.document.summary
+            draft.keyPoints = details.document.keyPoints
+            draft.methods = details.document.methods
+            draft.limitations = details.document.limitations
+        }
+    }
+
+    /// A read-only section rendering one AI insight as Markdown, with a hint
+    /// pointing at the generating command when empty.
+    @ViewBuilder
+    private func insightSection(
+        _ title: String, _ keyPath: KeyPath<Document, String?>, action: String
+    ) -> some View {
+        Section(title) {
+            if let text = draft[keyPath: keyPath]?.trimmingCharacters(in: .whitespaces),
+                !text.isEmpty
+            {
+                ScrollableMaxHeight(maxHeight: 220) {
+                    MarkdownText(text: text).textSelection(.enabled)
+                }
+            } else {
+                Text("Right-click the paper → \(action) to generate this.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var hasChanges: Bool {
@@ -127,6 +163,36 @@ struct InspectorView: View {
         case .webpage: return "Web Page"
         case .misc: return "Other"
         }
+    }
+}
+
+/// Scrolls its content once it grows past `maxHeight`, but hugs the content
+/// (no empty box) while it's shorter — used for long abstracts/summaries.
+struct ScrollableMaxHeight<Content: View>: View {
+    let maxHeight: CGFloat
+    @ViewBuilder var content: Content
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        ScrollView {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ContentHeightKey.self, value: geo.size.height)
+                    })
+        }
+        // Hug content until it exceeds the cap, then lock to the cap and scroll.
+        .frame(height: contentHeight == 0 ? nil : min(contentHeight, maxHeight))
+        .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
+    }
+}
+
+private struct ContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

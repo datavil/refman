@@ -301,6 +301,17 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    /// Stores an AI-generated insight (summary, key points, …) on the document.
+    /// The column is taken from `DocumentInsight`'s fixed raw values, so the
+    /// interpolation here is not user-controlled.
+    public func setInsight(_ insight: DocumentInsight, documentId: Int64, text: String) throws {
+        try dbWriter.write { db in
+            try db.execute(
+                sql: "UPDATE document SET \(insight.rawValue) = ?, modifiedAt = ? WHERE id = ?",
+                arguments: [text, Date(), documentId])
+        }
+    }
+
     public func fullText(documentId: Int64) throws -> String? {
         try dbWriter.read { db in
             try String.fetchOne(

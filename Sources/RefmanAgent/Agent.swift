@@ -31,19 +31,27 @@ let ollamaHost = ProcessInfo.processInfo.environment["REFMAN_OLLAMA_HOST"]
 let openaiModel = ProcessInfo.processInfo.environment["REFMAN_OPENAI_MODEL"] ?? ""
 
 let systemPrompt = """
-    You are Refman's research assistant, embedded in a reference manager. \
-    The user is reading one specific paper — the "currently open paper" — and \
-    questions are about THAT paper unless they clearly ask otherwise.
+    You are Refman Helper, the research assistant embedded in the Refman \
+    reference manager. The user is reading one specific paper — the "currently \
+    open paper" — and questions are about THAT paper unless they clearly ask \
+    otherwise.
 
-    When the user quotes or asks about a passage, answer it in the context of \
-    the currently open paper. Use get_current_document and get_document_text \
-    (which default to the open paper) to ground your answer. Do NOT use \
-    search_library for this — that tool is only for finding OTHER papers in the \
-    library when the user explicitly asks for related or different work. A \
-    quoted passage is not a search query.
+    The Refman tools are already connected and available to you. Call them \
+    directly — do NOT say you need to load, enable, or set up any tools, and do \
+    NOT ask the user to. Use get_current_document and get_document_text (which \
+    default to the open paper) to ground your answer. Do NOT use search_library \
+    for this — that tool is only for finding OTHER papers in the library when \
+    the user explicitly asks for related or different work. A quoted passage is \
+    not a search query.
 
-    Ground every answer in the actual documents; do not invent papers or \
-    contents. Be concise.
+    Answer style: no greetings, no sign-offs, and no narration of what you are \
+    doing or which tools you are calling. Go straight to the answer. Ground \
+    every answer in the actual documents; do not invent papers or contents. Be \
+    concise.
+
+    Answer exclusively in the language that you were communicated. \
+    DO NOT create tables unless explicitly asked by the user. \
+
     """
 
 let toolDefinitions: [[String: Any]] = [
@@ -206,8 +214,8 @@ func resolveCodexBinary() -> String? {
 
 /// Open the library directly (the app passes its path and the open document)
 /// and assemble the paper's context to inject into the prompt, reusing the
-/// same tools the other backends call.
-func codexContext() -> String? {
+/// same tools the other backends call. Shared by the Codex and Claude backends.
+func paperContext() -> String? {
     let env = ProcessInfo.processInfo.environment
     guard let dbPath = env["REFMAN_DB_PATH"],
         let documentId = Int64(env["REFMAN_DOCUMENT_ID"] ?? ""),
@@ -401,13 +409,6 @@ func claudeChat(
     if let systemPrompt { args += ["--append-system-prompt", systemPrompt] }
     if let resume { args += ["--resume", resume] }
     if !claudeModel.isEmpty { args += ["--model", claudeModel] }
-    if let mcpConfig = mcpConfigJSON() {
-        args += [
-            "--mcp-config", mcpConfig,
-            "--strict-mcp-config",
-            "--allowedTools", "mcp__refman",
-        ]
-    }
 
     let process = Process()
     process.executableURL = URL(fileURLWithPath: binary)
@@ -447,12 +448,6 @@ func claudeChat(
             {
                 state.streamedText = true
                 onText(text)
-            } else if event["type"] as? String == "content_block_start",
-                let block = event["content_block"] as? [String: Any],
-                let toolName = block["name"] as? String
-            {
-                // Same tool marker the Ollama path shows.
-                onText("\n*[\(toolName.replacingOccurrences(of: "mcp__refman__", with: ""))]*\n")
             }
         case "assistant":
             // Final text of an assistant turn; the per-token stream above is
@@ -705,12 +700,22 @@ struct Agent {
                         message:
                             "Claude Code CLI not found — install it (`curl -fsSL https://claude.ai/install.sh | bash`) and run `claude` once to log in.")
                 }
+                // Inject the open paper's context up front (like the Codex
+                // backend) so Claude answers immediately, without the slow tool
+                // round-trips that Claude Code's deferred MCP tools require. On
+                // the first turn we prepend the context; later turns rely on
+                // --resume, which already carries it in the session history.
+                let resume = state.claudeSession(for: sessionId)
+                var prompt = userText
+                if resume == nil, let context = paperContext() {
+                    prompt = context + "\n\nQuestion: " + userText
+                }
                 // --resume does not carry --append-system-prompt over, so
-                // pass the (tool-aware) system prompt on every turn.
+                // pass the system prompt on every turn.
                 let claudeId = try await claudeChat(
-                    binary: binary, prompt: userText,
+                    binary: binary, prompt: prompt,
                     systemPrompt: systemPrompt,
-                    resume: state.claudeSession(for: sessionId),
+                    resume: resume,
                     onText: emit)
                 if let claudeId {
                     state.setClaudeSession(claudeId, for: sessionId)
@@ -728,7 +733,7 @@ struct Agent {
                 // Codex is stateless here, so inject the paper context + the
                 // assistant instructions on every turn alongside the question.
                 var prompt = systemPrompt + "\n\n"
-                if let context = codexContext() { prompt += context + "\n\n" }
+                if let context = paperContext() { prompt += context + "\n\n" }
                 prompt += "Question: " + userText
                 try await codexChat(binary: binary, prompt: prompt, onText: emit)
                 return ["stopReason": "end_turn"]
@@ -765,8 +770,6 @@ struct Agent {
                     let function = call["function"] as? [String: Any] ?? [:]
                     let name = function["name"] as? String ?? ""
                     let arguments = function["arguments"] as? [String: Any] ?? [:]
-
-                    emit("\n*[\(name)]*\n")
 
                     let resultText: String
                     do {

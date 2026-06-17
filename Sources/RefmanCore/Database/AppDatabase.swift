@@ -192,6 +192,22 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v8") { db in
+            // AI-generated summary, kept separate from the original abstract.
+            try db.alter(table: "document") { t in
+                t.add(column: "summary", .text)
+            }
+        }
+
+        migrator.registerMigration("v9") { db in
+            // Further AI-generated insights, alongside the summary.
+            try db.alter(table: "document") { t in
+                t.add(column: "keyPoints", .text)
+                t.add(column: "methods", .text)
+                t.add(column: "limitations", .text)
+            }
+        }
+
         return migrator
     }
 }

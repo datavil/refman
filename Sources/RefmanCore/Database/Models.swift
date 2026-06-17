@@ -5,6 +5,11 @@ public enum DocumentType: String, Codable, CaseIterable, Sendable {
     case article, book, chapter, conferencePaper, thesis, report, preprint, webpage, misc
 }
 
+/// An AI-generated text field on a document. The raw value is the column name.
+public enum DocumentInsight: String, CaseIterable, Sendable {
+    case summary, keyPoints, methods, limitations
+}
+
 public struct Document: Identifiable, Equatable, Hashable, Codable,
     FetchableRecord, MutablePersistableRecord, Sendable
 {
@@ -13,6 +18,11 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
     public var type: DocumentType
     public var title: String
     public var abstract: String?
+    /// AI-generated insights, distinct from the original abstract.
+    public var summary: String?
+    public var keyPoints: String?
+    public var methods: String?
+    public var limitations: String?
     public var year: Int?
     public var venue: String?
     public var volume: String?
@@ -38,6 +48,10 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
         type: DocumentType = .article,
         title: String = "",
         abstract: String? = nil,
+        summary: String? = nil,
+        keyPoints: String? = nil,
+        methods: String? = nil,
+        limitations: String? = nil,
         year: Int? = nil,
         venue: String? = nil,
         volume: String? = nil,
@@ -59,6 +73,10 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
         self.type = type
         self.title = title
         self.abstract = abstract
+        self.summary = summary
+        self.keyPoints = keyPoints
+        self.methods = methods
+        self.limitations = limitations
         self.year = year
         self.venue = venue
         self.volume = volume
