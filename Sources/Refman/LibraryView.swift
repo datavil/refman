@@ -31,9 +31,28 @@ struct LibraryView: View {
     private static let pdfIconWhite = loadSVG("pdf-svgrepo-com-white")
 
     private static func loadSVG(_ name: String) -> NSImage {
-        Bundle.module.url(forResource: name, withExtension: "svg")
+        resourceBundle?.url(forResource: name, withExtension: "svg")
             .flatMap(NSImage.init(contentsOf:)) ?? NSImage()
     }
+
+    /// The SwiftPM resource bundle, located without `Bundle.module`'s trap:
+    /// in a packaged `.app` the bundle lives in `Contents/Resources`, but the
+    /// generated `Bundle.module` only checks the app root and a dev build path,
+    /// so it crashes. This checks the real locations and degrades gracefully.
+    private static let resourceBundle: Bundle? = {
+        let name = "Refman_Refman.bundle"
+        let candidates = [
+            Bundle.main.resourceURL,  // .app/Contents/Resources
+            Bundle.main.bundleURL,  // .app root and `swift run` exe dir
+            Bundle(for: BundleToken.self).resourceURL,
+        ]
+        for url in candidates.compactMap({ $0?.appendingPathComponent(name) }) {
+            if let bundle = Bundle(url: url) { return bundle }
+        }
+        return Bundle.main
+    }()
+
+    private final class BundleToken {}
 
     var body: some View {
         NavigationSplitView {
