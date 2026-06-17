@@ -35,6 +35,14 @@ struct LibraryView: View {
             .flatMap(NSImage.init(contentsOf:)) ?? NSImage()
     }
 
+    /// True when the bundled PDF glyphs load (non-empty). Drives the
+    /// `--check-resources` CI smoke check, which exercises this exact path in
+    /// the packaged `.app` — where a missing resource bundle would otherwise
+    /// only surface as a crash once the document table renders a row.
+    static func verifyResources() -> Bool {
+        pdfIcon.size.width > 0 && pdfIconWhite.size.width > 0
+    }
+
     /// The SwiftPM resource bundle, located without `Bundle.module`'s trap:
     /// in a packaged `.app` the bundle lives in `Contents/Resources`, but the
     /// generated `Bundle.module` only checks the app root and a dev build path,

@@ -8,6 +8,13 @@ struct RefmanApp: App {
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
 
     init() {
+        // CI smoke check: confirm packaged resources resolve, then exit.
+        if CommandLine.arguments.contains("--check-resources") {
+            let ok = LibraryView.verifyResources()
+            FileHandle.standardError.write(
+                Data((ok ? "resources OK\n" : "resources MISSING\n").utf8))
+            exit(ok ? 0 : 1)
+        }
         // Build-time icon export: render the icon and exit before any UI setup.
         AppIcon.exportIfRequested()
         // Running from `swift run` (no app bundle): become a regular app with a window.
