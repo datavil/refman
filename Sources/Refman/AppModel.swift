@@ -110,6 +110,14 @@ final class AppModel: ObservableObject {
         {
             return URL(fileURLWithPath: path)
         }
+        // No location configured yet (e.g. a fresh install of the distributed
+        // app). If a library already exists in iCloud Drive, adopt it so a
+        // synced library shows up without manual setup.
+        if let iCloud = LibraryLocation.iCloudDriveRoot(),
+            FileManager.default.fileExists(atPath: LibraryLocation.databaseURL(root: iCloud).path)
+        {
+            return iCloud
+        }
         return (try? LibraryLocation.defaultRoot())
             ?? FileManager.default.temporaryDirectory.appendingPathComponent("Refman")
     }
