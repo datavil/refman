@@ -29,6 +29,9 @@ struct RefmanApp: App {
         }
         .defaultSize(width: 1600, height: 1000)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { model.updater.check(userInitiated: true) }
+            }
             CommandGroup(after: .newItem) {
                 Button("New Reference…") { model.requestAdd() }
                     .keyboardShortcut("n", modifiers: [.command])

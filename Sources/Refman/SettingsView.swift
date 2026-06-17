@@ -123,6 +123,8 @@ struct SettingsView: View {
 
             ICloudSettingsSection()
 
+            UpdatesSettingsSection(updater: model.updater)
+
             Section("Metadata & Downloads") {
                 TextField(
                     "Contact email", text: $contactEmail,
@@ -318,6 +320,39 @@ struct LibrarySettingsSection: View {
     private func checkIntegrity() {
         report = model.runIntegrityCheck()
         showingReport = report != nil
+    }
+}
+
+/// App version and the GitHub-backed update check.
+struct UpdatesSettingsSection: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        Section("Updates") {
+            LabeledContent("Version", value: Updater.currentVersion)
+            HStack {
+                Button("Check for Updates") { updater.check(userInitiated: true) }
+                    .disabled(updater.status == .checking || updater.status == .downloading)
+                if let detail = statusDetail { Text(detail).foregroundStyle(.secondary) }
+                Spacer()
+                if case .available = updater.status {
+                    Button("Install") { updater.installPending() }
+                }
+            }
+            Text("Checks GitHub Releases and installs the latest version, then relaunches.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var statusDetail: String? {
+        switch updater.status {
+        case .idle: return nil
+        case .checking: return "Checking…"
+        case .upToDate: return "Up to date"
+        case .available(let version): return "\(version) available"
+        case .downloading: return "Downloading…"
+        case .failed(let message): return message
+        }
     }
 }
 

@@ -47,6 +47,7 @@ enum ExportFormat {
 final class AppModel: ObservableObject {
     let repository: LibraryRepository
     let store: LibraryStore
+    let updater = Updater()
 
     /// Rebuilt per access so it always uses the current contact email from Settings.
     var pipeline: ImportPipeline {
