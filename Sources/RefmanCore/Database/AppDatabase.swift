@@ -147,6 +147,51 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v5") { db in
+            // Re-clean abstracts stored by older builds: drop section headings,
+            // collapse the whitespace JATS pretty-printing left behind.
+            let rows = try Row.fetchAll(
+                db, sql: "SELECT id, abstract FROM document WHERE abstract IS NOT NULL")
+            for row in rows {
+                let id: Int64 = row["id"]
+                let abstract: String = row["abstract"]
+                let cleaned = TextDecoding.cleanAbstract(abstract)
+                guard cleaned != abstract else { continue }
+                try db.execute(
+                    sql: "UPDATE document SET abstract = ? WHERE id = ?",
+                    arguments: [cleaned, id])
+                try db.execute(
+                    sql: "UPDATE documentFTS SET abstract = ? WHERE rowid = ?",
+                    arguments: [cleaned, id])
+            }
+        }
+
+        migrator.registerMigration("v6") { db in
+            // Re-clean titles for LaTeX/whitespace leftovers (e.g. "\," → space).
+            let rows = try Row.fetchAll(db, sql: "SELECT id, title FROM document")
+            for row in rows {
+                let id: Int64 = row["id"]
+                let title: String = row["title"]
+                let cleaned = TextDecoding.clean(title)
+                guard cleaned != title else { continue }
+                try db.execute(
+                    sql: "UPDATE document SET title = ? WHERE id = ?",
+                    arguments: [cleaned, id])
+                try db.execute(
+                    sql: "UPDATE documentFTS SET title = ? WHERE rowid = ?",
+                    arguments: [cleaned, id])
+            }
+        }
+
+        migrator.registerMigration("v7") { db in
+            // Track reader opens (for "Recently Opened") and the single
+            // "Currently Reading" document.
+            try db.alter(table: "document") { t in
+                t.add(column: "openedAt", .datetime)
+                t.add(column: "isReading", .boolean).notNull().defaults(to: false)
+            }
+        }
+
         return migrator
     }
 }

@@ -180,8 +180,42 @@ import Testing
         #expect(TextDecoding.clean(#"50 \% yield"#) == "50 % yield")
     }
 
+    @Test func decodesLaTeXSpacing() {
+        #expect(TextDecoding.clean(#"accuracy of ~81\,%"#) == "accuracy of ~81 %")
+        #expect(TextDecoding.clean(#"a\;b\:c\!d"#) == "a b cd")
+        #expect(TextDecoding.clean(#"5\ kg"#) == "5 kg")
+    }
+
     @Test func leavesUnknownCommandsAlone() {
         // Unknown commands are kept verbatim (braces are still stripped).
         #expect(TextDecoding.clean(#"see \cite{ref}"#) == "see \\citeref")
+    }
+
+    @Test func cleanAbstractDropsHeadingsAndTidiesWhitespace() {
+        // Legacy CrossRef data: heading lines + pretty-print indentation.
+        let raw = "ABSTRACT\n                Uncovering the landscape is essential."
+        #expect(TextDecoding.cleanAbstract(raw) == "Uncovering the landscape is essential.")
+    }
+
+    @Test func cleanAbstractDropsStructuredSectionHeadings() {
+        let raw = "Abstract\n   Background\n   10x kits are common.\n   Results\n   Parse scaled better."
+        #expect(
+            TextDecoding.cleanAbstract(raw) == "10x kits are common. Parse scaled better.")
+    }
+
+    @Test func cleanAbstractUngluesLeadingHeading() {
+        #expect(
+            TextDecoding.cleanAbstract("AbstractSingle-cell omics revolutionized profiling.")
+                == "Single-cell omics revolutionized profiling.")
+        // A real word that merely starts with "abstract" is left intact.
+        #expect(
+            TextDecoding.cleanAbstract("Abstraction is a core idea.") == "Abstraction is a core idea.")
+    }
+
+    @Test func cleanAbstractRemovesSpaceBeforePunctuation() {
+        // Italic species name left on its own line → stray space before the period.
+        let raw = "in vitro and in\n   Escherichia coli\n   . In this study we report."
+        #expect(
+            TextDecoding.cleanAbstract(raw) == "in vitro and in Escherichia coli. In this study we report.")
     }
 }

@@ -21,6 +21,7 @@ let package = Package(
         .executableTarget(
             name: "Refman",
             dependencies: ["RefmanCore"],
+            resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(

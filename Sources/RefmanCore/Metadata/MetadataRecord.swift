@@ -31,7 +31,7 @@ public struct MetadataRecord: Equatable, Sendable {
     ) {
         self.type = type
         self.title = TextDecoding.clean(title)
-        self.abstract = abstract.map(TextDecoding.clean)
+        self.abstract = abstract.map(TextDecoding.cleanAbstract)
         self.authors = authors.map {
             (given: TextDecoding.clean($0.given), family: TextDecoding.clean($0.family))
         }

@@ -76,7 +76,7 @@ public enum RIS {
         let document = Document(
             type: type,
             title: entry.first("TI") ?? entry.first("T1") ?? "",
-            abstract: entry.first("AB") ?? entry.first("N2"),
+            abstract: (entry.first("AB") ?? entry.first("N2")).map(TextDecoding.cleanAbstract),
             year: year,
             venue: entry.first("JO") ?? entry.first("T2") ?? entry.first("JF"),
             volume: entry.first("VL"),

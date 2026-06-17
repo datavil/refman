@@ -8,7 +8,7 @@ struct ReaderView: View {
     let documentId: Int64
 
     @StateObject private var reader = ReaderModel()
-    @State private var showAnnotations = true
+    @State private var showAnnotations = false
     @State private var showAssistant = false
     @State private var pendingQuote: String?
     @State private var pendingAction: AssistantAction?

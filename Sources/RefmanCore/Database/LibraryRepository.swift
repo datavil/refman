@@ -195,6 +195,65 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    /// Records that the document's reader was just opened.
+    public func markOpened(documentId: Int64) throws {
+        try dbWriter.write { db in
+            try db.execute(
+                sql: "UPDATE document SET openedAt = ? WHERE id = ?",
+                arguments: [Date(), documentId])
+        }
+    }
+
+    /// Documents opened on or after the given date, most recently opened first.
+    public func recentlyOpenedDocuments(since date: Date) throws -> [DocumentDetails] {
+        try dbWriter.read { db in
+            let docs = try Document
+                .filter(Column("openedAt") >= date && Column("deletedAt") == nil)
+                .order(Column("openedAt").desc)
+                .fetchAll(db)
+            return try docs.map { doc in
+                DocumentDetails(
+                    document: doc,
+                    authors: try Self.fetchAuthors(db, documentId: doc.id!),
+                    tags: try Self.fetchTags(db, documentId: doc.id!)
+                )
+            }
+        }
+    }
+
+    /// Marks one document as "Currently Reading", clearing any previous one
+    /// (only a single document may be marked at a time).
+    public func setReading(documentId: Int64) throws {
+        try dbWriter.write { db in
+            try db.execute(sql: "UPDATE document SET isReading = 0 WHERE isReading = 1")
+            try db.execute(
+                sql: "UPDATE document SET isReading = 1 WHERE id = ?", arguments: [documentId])
+        }
+    }
+
+    /// Clears the "Currently Reading" mark.
+    public func clearReading() throws {
+        try dbWriter.write { db in
+            try db.execute(sql: "UPDATE document SET isReading = 0 WHERE isReading = 1")
+        }
+    }
+
+    /// The single document marked "Currently Reading", if any.
+    public func readingDocuments() throws -> [DocumentDetails] {
+        try dbWriter.read { db in
+            let docs = try Document
+                .filter(Column("isReading") == true && Column("deletedAt") == nil)
+                .fetchAll(db)
+            return try docs.map { doc in
+                DocumentDetails(
+                    document: doc,
+                    authors: try Self.fetchAuthors(db, documentId: doc.id!),
+                    tags: try Self.fetchTags(db, documentId: doc.id!)
+                )
+            }
+        }
+    }
+
     /// Documents that belong to no collection, newest first.
     public func uncategorizedDocuments() throws -> [DocumentDetails] {
         try dbWriter.read { db in

@@ -8,8 +8,8 @@ struct LibraryView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
-    @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
-    @AppStorage(SettingsKeys.rowDensity) private var rowDensity = RowDensity.comfortable.rawValue
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
     @State private var newCollectionName = ""
     @State private var showingNewCollection = false
     @State private var collectionToDelete: RefmanCore.Collection?
@@ -23,8 +23,17 @@ struct LibraryView: View {
     @State private var showingImportReport = false
     @State private var showingPalette = false
 
-    private var density: RowDensity { RowDensity(rawValue: rowDensity) ?? .comfortable }
     private var inTrash: Bool { model.sidebarSelection == .trash }
+
+    /// PDF file-type glyph for the document table, loaded once from the bundle.
+    /// Black artwork for light mode, a white variant for dark mode.
+    private static let pdfIcon = loadSVG("pdf-svgrepo-com")
+    private static let pdfIconWhite = loadSVG("pdf-svgrepo-com-white")
+
+    private static func loadSVG(_ name: String) -> NSImage {
+        Bundle.module.url(forResource: name, withExtension: "svg")
+            .flatMap(NSImage.init(contentsOf:)) ?? NSImage()
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -34,7 +43,9 @@ struct LibraryView: View {
             documentTable
                 .navigationSplitViewColumnWidth(min: 400, ideal: 560)
         } detail: {
-            if let details = model.selectedDocument {
+            if model.selectedDocumentIds.count > 1 {
+                multiSelectionSummary
+            } else if let details = model.selectedDocument {
                 InspectorView(details: details)
                     .id(details.document.id)  // reset editing state on selection change
             } else {
@@ -68,12 +79,14 @@ struct LibraryView: View {
         .sheet(isPresented: $showingImportReport) {
             ImportReportView(outcomes: model.importLog)
         }
+        .navigationTitle("")
         .toolbar {
             ToolbarItem {
                 Button {
                     showingAddPopover = true
                 } label: {
                     Label("Add Reference", systemImage: "plus.circle")
+                        .labelStyle(.titleAndIcon)
                 }
                 .help("Add a reference")
                 .popover(isPresented: $showingAddPopover, arrowEdge: .bottom) {
@@ -143,6 +156,12 @@ struct LibraryView: View {
                 Label("Trash", systemImage: "trash")
                     .tag(SidebarItem.trash)
             }
+            Section("Reading") {
+                Label("Recently Opened", systemImage: "clock.arrow.circlepath")
+                    .tag(SidebarItem.recentlyOpened)
+                Label("Currently Reading", systemImage: "book")
+                    .tag(SidebarItem.reading)
+            }
             Section("Collections") {
                 CollectionTree(
                     parentId: nil,
@@ -206,6 +225,18 @@ struct LibraryView: View {
                 subcollectionName = ""
             }
             Button("Cancel", role: .cancel) { subcollectionName = "" }
+        }
+        .safeAreaInset(edge: .top, alignment: .leading) {
+            HStack(spacing: 8) {
+                Image(nsImage: colorScheme == .dark ? AppIcon.markWhite : AppIcon.mark)
+                    .resizable()
+                    .frame(width: 40, height: 40)
+                Text("Refman")
+                    .font(.system(size: 28, weight: .bold))
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .safeAreaInset(edge: .bottom, alignment: .leading) {
             Button {
@@ -298,7 +329,7 @@ struct LibraryView: View {
     private var documentTable: some View {
         Table(
             of: DocumentDetails.self,
-            selection: $model.selectedDocumentId,
+            selection: $model.selectedDocumentIds,
             sortOrder: $sortOrder,
             columnCustomization: $columnCustomization
         ) {
@@ -328,7 +359,10 @@ struct LibraryView: View {
             .customizationID("venue")
             TableColumn("PDF") { details in
                 if details.document.fileHash != nil {
-                    Image(systemName: "doc.fill").foregroundStyle(.red.opacity(0.7))
+                    Image(nsImage: colorScheme == .dark ? Self.pdfIconWhite : Self.pdfIcon)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 16, height: 16)
                 }
             }
             .width(36)
@@ -339,7 +373,7 @@ struct LibraryView: View {
                     .itemProvider { NSItemProvider(object: String(details.id) as NSString) }
             }
         }
-        .environment(\.defaultMinListRowHeight, density.rowHeight)
+        .alternatingRowBackgrounds(.disabled)
         .contextMenu(forSelectionType: Int64.self) { ids in
             documentContextMenu(ids)
         } primaryAction: { ids in
@@ -359,30 +393,68 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func documentContextMenu(_ ids: Set<Int64>) -> some View {
-        if let id = ids.first {
+        if !ids.isEmpty {
             if inTrash {
-                Button("Restore") { model.restoreFromTrash(id: id) }
+                Button(ids.count == 1 ? "Restore" : "Restore \(ids.count)") {
+                    for id in ids { model.restoreFromTrash(id: id) }
+                }
                 Divider()
-                Button("Delete Permanently", role: .destructive) { model.purgeDocument(id: id) }
+                Button(ids.count == 1 ? "Delete Permanently" : "Delete \(ids.count) Permanently", role: .destructive) {
+                    for id in ids { model.purgeDocument(id: id) }
+                }
             } else {
-                Button("Open PDF") { openReader(id) }
-                Button("Quick Look") { quickLook(id) }
-                Button("Fetch PDF") { model.fetchPDF(id: id) }
-                Button("Refresh Metadata") { model.refreshMetadata(id: id) }
+                if ids.count == 1, let id = ids.first {
+                    Button("Open PDF") { openReader(id) }
+                    Button("Quick Look") { quickLook(id) }
+                    Button("Fetch PDF") { model.fetchPDF(id: id) }
+                    Button("Refresh Metadata") { model.refreshMetadata(id: id) }
+                    Divider()
+                    if model.documents.first(where: { $0.id == id })?.document.isReading == true {
+                        Button("Remove from Currently Reading") { model.clearReading() }
+                    } else {
+                        Button("Mark as Currently Reading") { model.setReading(id: id) }
+                    }
+                } else {
+                    Button("Refresh Metadata") { model.refreshMetadata(ids: Array(ids)) }
+                }
                 Menu("Add to Collection") {
                     ForEach(model.collections, id: \.id) { collection in
                         Button(collection.name) {
-                            model.selectedDocumentId = id
-                            model.addSelectedDocument(toCollection: collection.id!)
+                            model.add(documentIds: Array(ids), toCollection: collection.id!)
                         }
                     }
                 }
                 Divider()
-                Button("Delete", role: .destructive) {
-                    model.selectedDocumentId = id
-                    model.deleteSelectedDocument()
+                Button(ids.count == 1 ? "Delete" : "Delete \(ids.count) References", role: .destructive) {
+                    model.delete(documentIds: Array(ids))
                 }
             }
+        }
+    }
+
+    private var multiSelectionSummary: some View {
+        let selected = model.documents.filter { model.selectedDocumentIds.contains($0.id) }
+        let venues = Set(
+            selected.compactMap { $0.document.venue?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty })
+        let years = selected.compactMap { $0.document.year }
+
+        var parts: [String] = []
+        if !venues.isEmpty {
+            if venues.count <= 3 {
+                parts.append("from \(venues.sorted().joined(separator: ", "))")
+            } else {
+                parts.append("across \(venues.count) venues")
+            }
+        }
+        if let lo = years.min(), let hi = years.max() {
+            parts.append(lo == hi ? "\(lo)" : "\(lo)–\(hi)")
+        }
+
+        return ContentUnavailableView {
+            Label("\(selected.count) papers selected", systemImage: "doc.on.doc")
+        } description: {
+            if !parts.isEmpty { Text(parts.joined(separator: " · ")) }
         }
     }
 
@@ -392,6 +464,14 @@ struct LibraryView: View {
             ContentUnavailableView("Trash is Empty", systemImage: "trash")
         } else if !model.searchText.isEmpty {
             ContentUnavailableView.search(text: model.searchText)
+        } else if model.sidebarSelection == .recentlyOpened {
+            ContentUnavailableView(
+                "Nothing Opened Recently", systemImage: "clock.arrow.circlepath",
+                description: Text("Papers you open appear here for two days."))
+        } else if model.sidebarSelection == .reading {
+            ContentUnavailableView(
+                "Not Reading Anything", systemImage: "book",
+                description: Text("Right-click a paper and choose “Mark as Currently Reading.”"))
         } else if model.sidebarSelection == .all {
             ContentUnavailableView {
                 Label("Your Library is Empty", systemImage: "books.vertical")
@@ -421,6 +501,7 @@ struct LibraryView: View {
             model.statusMessage = "No PDF attached to this reference."
             return
         }
+        model.markOpened(id: id)
         openWindow(id: "reader", value: id)
     }
 

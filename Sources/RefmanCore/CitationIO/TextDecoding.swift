@@ -12,6 +12,28 @@ public enum TextDecoding {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Standalone section headings to drop from abstracts (CrossRef structured
+    /// abstracts and PDF-derived text put these on their own lines).
+    static let abstractHeadings: Set<String> = [
+        "abstract", "background", "introduction", "objective", "objectives",
+        "aim", "aims", "purpose", "method", "methods", "materials and methods",
+        "result", "results", "finding", "findings", "conclusion", "conclusions",
+        "discussion", "interpretation", "significance", "importance", "summary",
+    ]
+
+    /// `clean`, but first drops standalone section-heading lines and then
+    /// removes spaces left in front of punctuation (e.g. "coli . In" → "coli. In").
+    public static func cleanAbstract(_ s: String) -> String {
+        let body = s
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !abstractHeadings.contains($0.trimmingCharacters(in: .whitespaces).lowercased()) }
+            .joined(separator: " ")
+        return clean(body)
+            // Older builds glued the "Abstract" heading to the first word.
+            .replacingOccurrences(of: #"^(?i:abstract)(?=[A-Z])"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+([.,;:])"#, with: "$1", options: .regularExpression)
+    }
+
     // MARK: - HTML entities
 
     static let namedEntities: [String: String] = [
@@ -91,6 +113,11 @@ public enum TextDecoding {
         ] {
             t = t.replacingOccurrences(of: escaped, with: plain)
         }
+
+        // Spacing commands: thin/medium/thick and control space → one space;
+        // the negative thin space disappears. (e.g. "81\,%" → "81 %")
+        t = t.replacingOccurrences(of: #"\\!"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\\[,;:> ]"#, with: " ", options: .regularExpression)
 
         // Symbol accents (\'e, \"{o}, …) → base letter + combining mark.
         t = replacing(#"\\(['`^"~=.])\s*\{?\s*([A-Za-z])\s*\}?"#, in: t) { g in

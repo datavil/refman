@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 enum SidebarItem: Hashable {
     case all
     case recent
+    case recentlyOpened
+    case reading
     case uncategorized
     case trash
     case collection(Int64)
@@ -60,7 +62,14 @@ final class AppModel: ObservableObject {
     @Published var collections: [RefmanCore.Collection] = []
     @Published var tags: [Tag] = []
     @Published var sidebarSelection: SidebarItem = .all
-    @Published var selectedDocumentId: Int64?
+    @Published var selectedDocumentIds: Set<Int64> = []
+
+    /// Single-selection convenience derived from `selectedDocumentIds`.
+    /// `nil` when zero or multiple rows are selected.
+    var selectedDocumentId: Int64? {
+        get { selectedDocumentIds.count == 1 ? selectedDocumentIds.first : nil }
+        set { selectedDocumentIds = newValue.map { [$0] } ?? [] }
+    }
     @Published var searchText: String = ""
     @Published var statusMessage: String?
     @Published var isImporting = false
@@ -124,6 +133,12 @@ final class AppModel: ObservableObject {
                     let weekAgo = Calendar.current.date(
                         byAdding: .day, value: -7, to: Date()) ?? Date()
                     documents = try repository.recentDocuments(since: weekAgo)
+                case .recentlyOpened:
+                    let twoDaysAgo = Calendar.current.date(
+                        byAdding: .day, value: -2, to: Date()) ?? Date()
+                    documents = try repository.recentlyOpenedDocuments(since: twoDaysAgo)
+                case .reading:
+                    documents = try repository.readingDocuments()
                 case .uncategorized:
                     documents = try repository.uncategorizedDocuments()
                 case .trash:
@@ -246,6 +261,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshMetadata(ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        Task {
+            var refreshed = 0
+            for id in ids {
+                guard let details = documents.first(where: { $0.document.id == id }) else { continue }
+                do {
+                    if try await pipeline.refreshMetadata(for: details.document) != nil { refreshed += 1 }
+                } catch {
+                    statusMessage = "Refresh failed: \(error.localizedDescription)"
+                }
+            }
+            reload()
+            statusMessage = "Refreshed metadata for \(refreshed) of \(ids.count)"
+        }
+    }
+
     func importBibliographyViaPanel() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [
@@ -321,6 +353,41 @@ final class AppModel: ObservableObject {
         } catch {
             statusMessage = "Delete failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Moves the given documents to the Trash (recoverable).
+    func delete(documentIds ids: [Int64]) {
+        guard !ids.isEmpty else { return }
+        do {
+            for id in ids { try repository.delete(documentId: id) }
+            selectedDocumentIds = []
+            reload()
+            statusMessage = ids.count == 1 ? "Moved to Trash" : "Moved \(ids.count) to Trash"
+        } catch {
+            statusMessage = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Records that a document's reader was opened (drives "Recently Opened").
+    func markOpened(id: Int64) {
+        try? repository.markOpened(documentId: id)
+        reload()
+    }
+
+    /// Marks one document as "Currently Reading", replacing any previous one.
+    func setReading(id: Int64) {
+        do {
+            try repository.setReading(documentId: id)
+            reload()
+        } catch {
+            statusMessage = "Could not mark as reading: \(error.localizedDescription)"
+        }
+    }
+
+    /// Clears the "Currently Reading" mark.
+    func clearReading() {
+        try? repository.clearReading()
+        reload()
     }
 
     func restoreFromTrash(id: Int64) {

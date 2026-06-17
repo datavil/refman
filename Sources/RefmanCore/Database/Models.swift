@@ -27,6 +27,10 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
     public var modifiedAt: Date
     /// Set when the document is in the Trash; nil for live documents.
     public var deletedAt: Date?
+    /// Last time the document's reader was opened; nil if never opened.
+    public var openedAt: Date?
+    /// True for the single document marked "Currently Reading".
+    public var isReading: Bool
 
     public init(
         id: Int64? = nil,
@@ -46,7 +50,9 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
         fileName: String? = nil,
         addedAt: Date = Date(),
         modifiedAt: Date = Date(),
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil,
+        openedAt: Date? = nil,
+        isReading: Bool = false
     ) {
         self.id = id
         self.uuid = uuid
@@ -66,6 +72,8 @@ public struct Document: Identifiable, Equatable, Hashable, Codable,
         self.addedAt = addedAt
         self.modifiedAt = modifiedAt
         self.deletedAt = deletedAt
+        self.openedAt = openedAt
+        self.isReading = isReading
     }
 
     public static let databaseTableName = "document"

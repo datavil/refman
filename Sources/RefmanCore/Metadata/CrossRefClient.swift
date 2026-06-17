@@ -65,10 +65,26 @@ public struct CrossRefClient: Sendable {
         )
     }
 
-    /// CrossRef text arrives as JATS XML; strip the tags and collapse the
-    /// whitespace runs left behind by pretty-printing.
+    /// CrossRef text arrives as JATS XML. Drop section headings, turn block
+    /// boundaries into spaces (so paragraphs don't run together), and remove
+    /// the remaining inline tags without gluing the words they wrapped.
     static func stripJATS(_ s: String) -> String {
-        s.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        var t = s
+        // Section/abstract headings ("Abstract", "Background", …).
+        t = t.replacingOccurrences(
+            of: #"(?is)<(?:jats:)?title\b[^>]*>.*?</(?:jats:)?title>"#,
+            with: "", options: .regularExpression)
+        // Block boundaries become spaces.
+        t = t.replacingOccurrences(
+            of: #"(?i)</?(?:jats:)?(?:p|sec|abstract|list|list-item)\b[^>]*>"#,
+            with: " ", options: .regularExpression)
+        // Superscripts/subscripts hug their base token; drop pretty-print
+        // whitespace in front of them so "CD8 <sup>+</sup>" → "CD8+".
+        t = t.replacingOccurrences(
+            of: #"(?i)\s+(</?(?:jats:)?su[bp]\b)"#, with: "$1", options: .regularExpression)
+        // Inline tags (italic, sup, sub, …) vanish without adding a space.
+        t = t.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        return t
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

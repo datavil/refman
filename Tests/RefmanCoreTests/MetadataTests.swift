@@ -87,7 +87,26 @@ import Testing
     @Test func stripsMarkupAndWhitespaceFromTitle() {
         let raw = "Architects of immunity: How dendritic cells shape CD8\n  <sup>+</sup>\n  T cell fate"
         let cleaned = CrossRefClient.stripJATS(raw)
-        #expect(cleaned == "Architects of immunity: How dendritic cells shape CD8 + T cell fate")
+        // The superscript attaches to its base token, keeping the trailing space.
+        #expect(cleaned == "Architects of immunity: How dendritic cells shape CD8+ T cell fate")
+    }
+
+    @Test func dropsAbstractHeadingWithoutGluing() {
+        let raw = "<jats:title>Abstract</jats:title><jats:p>Single-cell omics revolutionized profiling.</jats:p>"
+        #expect(CrossRefClient.stripJATS(raw) == "Single-cell omics revolutionized profiling.")
+    }
+
+    @Test func dropsStructuredSectionHeadings() {
+        let raw = """
+            <jats:sec><jats:title>Background</jats:title><jats:p>10x kits are common.</jats:p></jats:sec>\
+            <jats:sec><jats:title>Results</jats:title><jats:p>Parse scaled better.</jats:p></jats:sec>
+            """
+        #expect(CrossRefClient.stripJATS(raw) == "10x kits are common. Parse scaled better.")
+    }
+
+    @Test func keepsInlineMarkupTight() {
+        // Inline tags are removed without injecting a space, so digits/words stay joined.
+        #expect(CrossRefClient.stripJATS("up to 10<jats:sup>6</jats:sup> cells") == "up to 106 cells")
     }
 }
 

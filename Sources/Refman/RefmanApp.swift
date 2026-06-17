@@ -5,7 +5,7 @@ import SwiftUI
 @main
 struct RefmanApp: App {
     @StateObject private var model = AppModel.live()
-    @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
+    @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
 
     init() {
         // Running from `swift run` (no app bundle): become a regular app with a window.
@@ -44,9 +44,9 @@ struct RefmanApp: App {
                     .keyboardShortcut("k", modifiers: [.command])
             }
             CommandMenu("Library") {
-                Button("Move to Trash") { model.deleteSelectedDocument() }
+                Button("Move to Trash") { model.delete(documentIds: Array(model.selectedDocumentIds)) }
                     .keyboardShortcut(.delete, modifiers: [.command])
-                    .disabled(model.selectedDocumentId == nil)
+                    .disabled(model.selectedDocumentIds.isEmpty)
                 Button("Empty Trash") { model.emptyTrash() }
                 Divider()
                 Button("Back Up Library…") { model.backupViaPanel() }

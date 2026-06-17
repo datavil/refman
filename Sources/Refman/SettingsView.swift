@@ -26,7 +26,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 
 enum SettingsKeys {
     static let appearance = "appearance"
-    static let rowDensity = "rowDensity"
     static let agentPath = "agentPath"
     static let llmProvider = "llmProvider"  // "ollama" | "openai" | "claude"
     static let ollamaModel = "ollamaModel"
@@ -35,15 +34,6 @@ enum SettingsKeys {
     static let highlightPalette = "highlightPalette"
     static let contactEmail = "contactEmail"
     static let libraryRootPath = "libraryRootPath"
-}
-
-enum RowDensity: String, CaseIterable, Identifiable {
-    case comfortable, compact
-
-    var id: String { rawValue }
-    var label: String { self == .comfortable ? "Comfortable" : "Compact" }
-    /// Minimum row height for the document table.
-    var rowHeight: CGFloat { self == .comfortable ? 34 : 22 }
 }
 
 /// Lists models from a local Ollama for the model picker.
@@ -106,8 +96,7 @@ final class CodexModelList: ObservableObject {
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
-    @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.system.rawValue
-    @AppStorage(SettingsKeys.rowDensity) private var rowDensity = RowDensity.comfortable.rawValue
+    @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
     @AppStorage(SettingsKeys.agentPath) private var agentPath = ""
     @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
     @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
@@ -117,18 +106,13 @@ struct SettingsView: View {
 
     @StateObject private var modelList = OllamaModelList()
     @StateObject private var codexList = CodexModelList()
+    @FocusState private var emailFocused: Bool
 
     var body: some View {
         Form {
             Section("Appearance") {
                 Picker("Theme", selection: $appearance) {
                     ForEach(AppAppearance.allCases) { option in
-                        Text(option.label).tag(option.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Picker("List density", selection: $rowDensity) {
-                    ForEach(RowDensity.allCases) { option in
                         Text(option.label).tag(option.rawValue)
                     }
                 }
@@ -143,6 +127,7 @@ struct SettingsView: View {
                 TextField(
                     "Contact email", text: $contactEmail,
                     prompt: Text("you@example.com"))
+                    .focused($emailFocused)
                 Text(
                     "Used to fetch open-access PDFs (Unpaywall) and for polite API "
                         + "access to CrossRef. Required for DOI PDF downloads."
@@ -242,6 +227,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .contentShape(Rectangle())
+        .onTapGesture { emailFocused = false }
         .frame(width: 480, height: 600)
         .onAppear {
             modelList.load()
