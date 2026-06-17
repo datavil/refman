@@ -8,6 +8,8 @@ struct RefmanApp: App {
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
 
     init() {
+        // Build-time icon export: render the icon and exit before any UI setup.
+        AppIcon.exportIfRequested()
         // Running from `swift run` (no app bundle): become a regular app with a window.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)

@@ -10,6 +10,29 @@ enum AppIcon {
         }
     }
 
+    /// When launched with `--export-icon <path>`, writes a 1024×1024 PNG of the
+    /// icon and exits. Lets the build script bake an `.icns` from this single
+    /// source of truth rather than maintaining a separate image asset.
+    static func exportIfRequested() {
+        let args = CommandLine.arguments
+        guard let idx = args.firstIndex(of: "--export-icon"), idx + 1 < args.count else { return }
+        let path = args[idx + 1]
+        guard let tiff = image.tiffRepresentation,
+            let rep = NSBitmapImageRep(data: tiff),
+            let png = rep.representation(using: .png, properties: [:])
+        else {
+            FileHandle.standardError.write(Data("export-icon: render failed\n".utf8))
+            exit(1)
+        }
+        do {
+            try png.write(to: URL(fileURLWithPath: path))
+            exit(0)
+        } catch {
+            FileHandle.standardError.write(Data("export-icon: \(error)\n".utf8))
+            exit(1)
+        }
+    }
+
     /// Transparent logo mark in the dark ink color, for light backgrounds.
     static var mark: NSImage { markImage(tint: ink) }
 

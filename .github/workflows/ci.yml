@@ -50,14 +50,18 @@ jobs:
 
           Download the `.dmg` (drag Refman to Applications) or the `.zip`.
 
-          Refman is not signed with an Apple Developer ID, so on first launch
-          macOS shows **"Refman can't be opened because Apple cannot check it
-          for malicious software."** To open it:
+          Refman is not signed with an Apple Developer ID, so macOS Gatekeeper
+          blocks it on first launch ("Apple could not verify… is free of
+          malware"). To open it, run this once in Terminal:
 
-          - **Right-click** Refman.app → **Open** → **Open** in the dialog, or
-          - run `xattr -dr com.apple.quarantine /Applications/Refman.app`
+          ```
+          xattr -dr com.apple.quarantine /Applications/Refman.app
+          ```
 
-          You only need to do this once.
+          Then open Refman normally. (Alternatively, try launching it once, then
+          go to **System Settings → Privacy & Security** and click **Open
+          Anyway**. On recent macOS the old right-click → Open trick no longer
+          works for unsigned apps.)
           EOF
       - name: Create release
         env:
