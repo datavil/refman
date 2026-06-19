@@ -16,6 +16,7 @@ let package = Package(
         .target(
             name: "RefmanCore",
             dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
+            resources: [.copy("Resources/Citeproc")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(

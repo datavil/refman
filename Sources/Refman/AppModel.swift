@@ -340,6 +340,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Formats the given documents with citeproc and puts the result on the
+    /// pasteboard. Document order follows `ids` for in-text citations.
+    func copyCitation(documentIds ids: [Int64], style: Citeproc.Style, mode: Citeproc.Mode) {
+        let items = ids.compactMap { try? repository.document(id: $0) }
+        guard !items.isEmpty else { return }
+        do {
+            let text = try Citeproc.format(items, style: style, mode: mode)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            let what = mode == .bibliography ? "reference" : "in-text citation"
+            statusMessage = "Copied \(style.label) \(what) (\(items.count) item\(items.count == 1 ? "" : "s"))"
+        } catch {
+            statusMessage = "Couldn't format citation: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Editing
 
     /// Generates an AI insight (summary, key points, …) for a document and
@@ -477,6 +493,18 @@ final class AppModel: ObservableObject {
             reload()
         } catch {
             statusMessage = "Could not delete collection: \(error.localizedDescription)"
+        }
+    }
+
+    /// Reorders the siblings under `parentId` after a drag in the sidebar.
+    func moveCollections(parentId: Int64?, from source: IndexSet, to destination: Int) {
+        var siblings = collections.filter { $0.parentId == parentId }
+        siblings.move(fromOffsets: source, toOffset: destination)
+        do {
+            try repository.reorderCollections(siblings.compactMap(\.id))
+            reload()
+        } catch {
+            statusMessage = "Could not reorder collections: \(error.localizedDescription)"
         }
     }
 

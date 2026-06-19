@@ -147,16 +147,19 @@ public struct Collection: Identifiable, Equatable, Hashable, Codable,
     public var name: String
     public var parentId: Int64?
     public var icon: String?
+    /// Manual ordering among siblings (same `parentId`); lower sorts first.
+    public var sortOrder: Int
 
     public init(
         id: Int64? = nil, uuid: String = UUID().uuidString, name: String,
-        parentId: Int64? = nil, icon: String? = nil
+        parentId: Int64? = nil, icon: String? = nil, sortOrder: Int = 0
     ) {
         self.id = id
         self.uuid = uuid
         self.name = name
         self.parentId = parentId
         self.icon = icon
+        self.sortOrder = sortOrder
     }
 
     public static let databaseTableName = "collection"

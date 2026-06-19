@@ -123,6 +123,28 @@ import Testing
         #expect(try repo.allDocuments(in: collection.id!).isEmpty)
     }
 
+    @Test func collectionsReorder() throws {
+        let repo = try makeRepo()
+        let a = try repo.createCollection(name: "Alpha")
+        let b = try repo.createCollection(name: "Beta")
+        let c = try repo.createCollection(name: "Gamma")
+        // New collections append in creation order.
+        #expect(try repo.allCollections().map(\.name) == ["Alpha", "Beta", "Gamma"])
+
+        try repo.reorderCollections([c.id!, a.id!, b.id!])
+        #expect(try repo.allCollections().map(\.name) == ["Gamma", "Alpha", "Beta"])
+    }
+
+    @Test func subcollectionsOrderIndependently() throws {
+        let repo = try makeRepo()
+        let parent = try repo.createCollection(name: "Parent")
+        let x = try repo.createCollection(name: "X", parentId: parent.id)
+        let y = try repo.createCollection(name: "Y", parentId: parent.id)
+        try repo.reorderCollections([y.id!, x.id!])
+        let kids = try repo.allCollections().filter { $0.parentId == parent.id }
+        #expect(kids.map(\.name) == ["Y", "X"])
+    }
+
     @Test func tagsRoundTripAndOrphanCleanup() throws {
         let repo = try makeRepo()
         let doc = try repo.insert(Document(title: "Tagged"))

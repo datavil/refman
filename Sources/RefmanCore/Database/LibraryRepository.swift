@@ -350,7 +350,15 @@ public final class LibraryRepository: Sendable {
     @discardableResult
     public func createCollection(name: String, parentId: Int64? = nil) throws -> Collection {
         try dbWriter.write { db in
-            var c = Collection(name: name, parentId: parentId)
+            // Append after existing siblings.
+            let next = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COALESCE(MAX(sortOrder), -1) + 1 FROM collection
+                    WHERE parentId IS ?
+                    """,
+                arguments: [parentId]) ?? 0
+            var c = Collection(name: name, parentId: parentId, sortOrder: next)
             try c.insert(db)
             return c
         }
@@ -358,7 +366,18 @@ public final class LibraryRepository: Sendable {
 
     public func allCollections() throws -> [Collection] {
         try dbWriter.read { db in
-            try Collection.order(Column("name")).fetchAll(db)
+            try Collection.order(Column("sortOrder"), Column("name")).fetchAll(db)
+        }
+    }
+
+    /// Rewrites `sortOrder` for the given sibling ids in the order provided.
+    public func reorderCollections(_ orderedIds: [Int64]) throws {
+        try dbWriter.write { db in
+            for (index, id) in orderedIds.enumerated() {
+                try db.execute(
+                    sql: "UPDATE collection SET sortOrder = ? WHERE id = ?",
+                    arguments: [index, id])
+            }
         }
     }
 

@@ -32,6 +32,7 @@ enum SettingsKeys {
     static let claudeModel = "claudeModel"
     static let openaiModel = "openaiModel"
     static let highlightPalette = "highlightPalette"
+    static let citationStyle = "citationStyle"
     static let contactEmail = "contactEmail"
     static let libraryRootPath = "libraryRootPath"
 }
@@ -106,6 +107,7 @@ struct SettingsView: View {
 
     @StateObject private var modelList = OllamaModelList()
     @StateObject private var codexList = CodexModelList()
+    @StateObject private var providerSetup = ProviderSetupModel()
     @FocusState private var emailFocused: Bool
 
     var body: some View {
@@ -161,6 +163,7 @@ struct SettingsView: View {
 
                 if llmProvider == "claude" {
                     Section("Claude") {
+                        ProviderSetupView(provider: .claude, setup: providerSetup)
                         Picker("Model", selection: $claudeModel) {
                             Text("Default").tag("")
                             Text("Sonnet").tag("sonnet")
@@ -169,14 +172,14 @@ struct SettingsView: View {
                         }
                         Text(
                             "Uses the Claude Code CLI signed in with your Claude "
-                                + "subscription — no API key, no per-token billing. Install with "
-                                + "`curl -fsSL https://claude.ai/install.sh | bash` and run `claude` once to log in."
+                                + "subscription — no API key, no per-token billing."
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     }
                 } else if llmProvider == "openai" {
                     Section("OpenAI (Codex)") {
+                        ProviderSetupView(provider: .openai, setup: providerSetup)
                         if codexList.models.isEmpty {
                             TextField(
                                 "Model", text: $openaiModel,
@@ -191,24 +194,27 @@ struct SettingsView: View {
                         }
                         Text(
                             "Uses the Codex CLI signed in with your ChatGPT subscription "
-                                + "— no API key, no per-token billing. Install with "
-                                + "`curl -fsSL https://chatgpt.com/codex/install.sh | sh` and run `codex login` once to sign in."
+                                + "— no API key, no per-token billing."
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     }
                 } else {
+                    Section("Ollama") {
+                        ProviderSetupView(provider: .ollama, setup: providerSetup)
+                    }
                     Section("Ollama Model") {
                         if modelList.models.isEmpty {
-                            HStack {
-                                TextField(
-                                    "Model", text: $ollamaModel,
-                                    prompt: Text("largest installed (auto)"))
-                                if modelList.loadFailed {
-                                    Image(systemName: "exclamationmark.triangle")
-                                        .foregroundStyle(.orange)
-                                        .help("Could not reach Ollama — is `ollama serve` running?")
-                                }
+                            TextField(
+                                "Model", text: $ollamaModel,
+                                prompt: Text("largest installed (auto)"))
+                            if modelList.loadFailed {
+                                Label(
+                                    "Can't reach Ollama — start it above, then Refresh.",
+                                    systemImage: "exclamationmark.triangle.fill"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.orange)
                             }
                         } else {
                             Picker("Model", selection: $ollamaModel) {
@@ -235,6 +241,7 @@ struct SettingsView: View {
         .onAppear {
             modelList.load()
             codexList.load()
+            providerSetup.refresh()
         }
         .background {
             // Esc closes the Settings window.

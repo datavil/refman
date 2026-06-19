@@ -17,6 +17,11 @@ struct RefmanApp: App {
         }
         // Build-time icon export: render the icon and exit before any UI setup.
         AppIcon.exportIfRequested()
+        // The Gemini provider was removed (Google ended free CLI login); migrate
+        // any stale selection back to a working provider.
+        if UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) == "gemini" {
+            UserDefaults.standard.set("ollama", forKey: SettingsKeys.llmProvider)
+        }
         // Running from `swift run` (no app bundle): become a regular app with a window.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)

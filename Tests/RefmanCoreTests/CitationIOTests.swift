@@ -157,6 +157,46 @@ import Testing
     }
 }
 
+@Suite struct CiteprocTests {
+    let einstein = DocumentDetails(
+        document: Document(
+            type: .article, title: "On the Electrodynamics of Moving Bodies", year: 1905,
+            venue: "Annalen der Physik", volume: "17", pages: "891–921"),
+        authors: [Author(given: "Albert", family: "Einstein")]
+    )
+
+    @Test func formatsAPABibliography() throws {
+        let out = try Citeproc.format([einstein], style: .apa, mode: .bibliography)
+        #expect(out.contains("Einstein, A."))
+        #expect(out.contains("(1905)"))
+        #expect(out.lowercased().contains("on the electrodynamics of moving bodies"))
+        #expect(out.contains("891–921"))
+    }
+
+    @Test func formatsInTextCitation() throws {
+        let out = try Citeproc.format([einstein], style: .apa, mode: .citation)
+        #expect(out.contains("Einstein"))
+        #expect(out.contains("1905"))
+    }
+
+    @Test func numberedStyleProducesBracket() throws {
+        let out = try Citeproc.format([einstein], style: .ieee, mode: .bibliography)
+        #expect(out.contains("[1]"))
+        #expect(out.contains("Einstein"))
+    }
+
+    @Test func everyBundledStyleLoads() throws {
+        for style in Citeproc.Style.allCases {
+            let out = try Citeproc.format([einstein], style: style, mode: .bibliography)
+            #expect(!out.isEmpty, "style \(style.rawValue) produced no output")
+        }
+    }
+
+    @Test func emptyInputReturnsEmpty() throws {
+        #expect(try Citeproc.format([], style: .apa, mode: .bibliography).isEmpty)
+    }
+}
+
 @Suite struct TextDecodingTests {
     @Test func decodesHTMLEntities() {
         #expect(TextDecoding.clean("Cell Host &amp; Microbe") == "Cell Host & Microbe")

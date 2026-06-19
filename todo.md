@@ -30,7 +30,9 @@ CloudKit sync, ACP for local-LLM assistant. SPM-based (`swift build` / `swift ru
 - [x] BibTeX parser + exporter (roundtrip-tested), citation key generation
 - [x] RIS parser + exporter (roundtrip-tested)
 - [x] CSL-JSON export
-- [ ] citeproc-js via JavaScriptCore + bundled CSL styles (formatted bibliographies)
+- [x] citeproc-js via JavaScriptCore + bundled CSL styles (formatted bibliographies);
+      Copy Citation / Copy Bibliography in the library context menu (APA, Nature,
+      IEEE, AMA/Vancouver, Chicago)
 
 ## Phase 4 — Sync (CloudKit) — NOT STARTED
 - [ ] Requires an Xcode app target + Apple Developer signing + CloudKit entitlements;
@@ -54,6 +56,6 @@ CloudKit sync, ACP for local-LLM assistant. SPM-based (`swift build` / `swift ru
 ## Later
 - [ ] Watched-folder auto-import
 - [ ] GROBID-based metadata extraction for PDFs without DOI
-- [ ] Word-processor citation integration
+- [ ] Word-processor citation integration (live in-Word plugin) — see `word-integration.plan.md`
 - [ ] Proper .app bundle (icon, signing, notarization)
 - [ ] Annotation colors picker; ink annotations

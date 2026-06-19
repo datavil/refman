@@ -53,6 +53,17 @@ final class Updater: ObservableObject {
 
     private var latest: (version: String, zipURL: URL, page: URL)?
 
+    private static let lastCheckKey = "lastUpdateCheck"
+
+    /// Checks GitHub at most once a day, silently — the result surfaces as the
+    /// sidebar "Update available" pill rather than an alert. Call on launch.
+    func checkInBackgroundIfDue() {
+        let last = UserDefaults.standard.object(forKey: Self.lastCheckKey) as? Date
+        if let last, Date().timeIntervalSince(last) < 24 * 3600 { return }
+        UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
+        check(userInitiated: false)
+    }
+
     /// Fetches the latest release and compares it to the running version.
     /// `userInitiated` surfaces the result (and any error) in an alert.
     func check(userInitiated: Bool) {

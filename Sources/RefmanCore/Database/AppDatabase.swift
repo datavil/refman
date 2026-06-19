@@ -208,6 +208,21 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v10") { db in
+            // Manual collection ordering. Backfill following the existing
+            // name order so the upgrade doesn't reshuffle anyone's sidebar.
+            try db.alter(table: "collection") { t in
+                t.add(column: "sortOrder", .integer).notNull().defaults(to: 0)
+            }
+            let ids = try Int64.fetchAll(
+                db, sql: "SELECT id FROM collection ORDER BY parentId, name")
+            for (index, id) in ids.enumerated() {
+                try db.execute(
+                    sql: "UPDATE collection SET sortOrder = ? WHERE id = ?",
+                    arguments: [index, id])
+            }
+        }
+
         return migrator
     }
 }

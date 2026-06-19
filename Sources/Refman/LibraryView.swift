@@ -10,6 +10,7 @@ struct LibraryView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
+    @AppStorage(SettingsKeys.citationStyle) private var citationStyleRaw = Citeproc.Style.apa.rawValue
     @State private var newCollectionName = ""
     @State private var showingNewCollection = false
     @State private var collectionToDelete: RefmanCore.Collection?
@@ -41,6 +42,7 @@ struct LibraryView: View {
     /// only surface as a crash once the document table renders a row.
     static func verifyResources() -> Bool {
         pdfIcon.size.width > 0 && pdfIconWhite.size.width > 0
+            && Citeproc.resourcesAvailable()
     }
 
     /// The SwiftPM resource bundle, located without `Bundle.module`'s trap:
@@ -66,6 +68,7 @@ struct LibraryView: View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+                .toolbar(removing: .sidebarToggle)
         } content: {
             documentTable
                 .navigationSplitViewColumnWidth(min: 400, ideal: 560)
@@ -94,7 +97,9 @@ struct LibraryView: View {
             case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
             }
         }
+        .background(ToolbarConfigurator())
         .quickLookPreview($previewURL)
+        .task { model.updater.checkInBackgroundIfDue() }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
         }
@@ -113,7 +118,6 @@ struct LibraryView: View {
                     showingAddPopover = true
                 } label: {
                     Label("Add Reference", systemImage: "plus.circle")
-                        .labelStyle(.titleAndIcon)
                 }
                 .help("Add a reference")
                 .popover(isPresented: $showingAddPopover, arrowEdge: .bottom) {
@@ -266,15 +270,7 @@ struct LibraryView: View {
             .padding(.vertical, 8)
         }
         .safeAreaInset(edge: .bottom, alignment: .leading) {
-            Button {
-                openSettings()
-            } label: {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .padding(10)
-            .help("Refman Settings (⌘,)")
+            SidebarFooter(updater: model.updater) { openSettings() }
         }
     }
 
@@ -449,6 +445,8 @@ struct LibraryView: View {
                 } else {
                     Button("Refresh Metadata") { model.refreshMetadata(ids: Array(ids)) }
                 }
+                copyMenu("Copy Formatted Citation", ids: ids, mode: .bibliography)
+                copyMenu("Copy In-Text Citation", ids: ids, mode: .citation)
                 Menu("Add to Collection") {
                     ForEach(model.collections, id: \.id) { collection in
                         Button(collection.name) {
@@ -461,6 +459,34 @@ struct LibraryView: View {
                     model.delete(documentIds: Array(ids))
                 }
             }
+        }
+    }
+
+    /// The remembered citation style used for a direct (primary-action) copy.
+    private var citationStyle: Citeproc.Style {
+        Citeproc.Style(rawValue: citationStyleRaw) ?? .apa
+    }
+
+    /// A split button: clicking copies with the remembered style; the submenu
+    /// switches the style (and remembers it) before copying.
+    private func copyMenu(_ title: String, ids: Set<Int64>, mode: Citeproc.Mode) -> some View {
+        Menu {
+            ForEach(Citeproc.Style.allCases, id: \.self) { style in
+                Button {
+                    citationStyleRaw = style.rawValue
+                    model.copyCitation(documentIds: Array(ids), style: style, mode: mode)
+                } label: {
+                    if style == citationStyle {
+                        Label(style.label, systemImage: "checkmark")
+                    } else {
+                        Text(style.label)
+                    }
+                }
+            }
+        } label: {
+            Text("\(title) (\(citationStyle.label))")
+        } primaryAction: {
+            model.copyCitation(documentIds: Array(ids), style: citationStyle, mode: mode)
         }
     }
 
@@ -556,6 +582,63 @@ struct LibraryView: View {
     }
 }
 
+/// Forces the window toolbar to icon-only and locks it down, so toolbar items
+/// never show labels and the right-click "Icon and Text / Icon Only / Text Only"
+/// menu doesn't appear. (`allowsDisplayModeCustomization` is macOS 15+; on
+/// earlier systems items are still pinned to icon-only.)
+private struct ToolbarConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { configure(view.window?.toolbar) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { configure(nsView.window?.toolbar) }
+    }
+
+    private func configure(_ toolbar: NSToolbar?) {
+        guard let toolbar else { return }
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        if #available(macOS 15.0, *) {
+            toolbar.allowsDisplayModeCustomization = false
+        }
+    }
+}
+
+/// Bottom of the sidebar: the Settings button, plus an "Update available" pill
+/// when a newer release was found by the background check.
+private struct SidebarFooter: View {
+    @ObservedObject var updater: Updater
+    let openSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if case .available(let version) = updater.status {
+                Button {
+                    updater.installPending()
+                } label: {
+                    Label("Update to \(version)", systemImage: "arrow.down.circle.fill")
+                        .font(.callout)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .help("Install Refman \(version) and relaunch")
+            }
+            Button {
+                openSettings()
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Refman Settings (⌘,)")
+        }
+        .padding(10)
+    }
+}
+
 /// One level of the collection hierarchy; recurses for subcollections.
 private struct CollectionTree: View {
     @EnvironmentObject var model: AppModel
@@ -579,6 +662,9 @@ private struct CollectionTree: View {
                 row(for: collection)
                     .tag(SidebarItem.collection(collection.id!))
             }
+        }
+        .onMove { source, destination in
+            model.moveCollections(parentId: parentId, from: source, to: destination)
         }
     }
 
