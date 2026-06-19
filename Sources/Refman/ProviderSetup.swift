@@ -48,6 +48,13 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     /// Whether "signed in" can be detected: Codex writes `~/.codex/auth.json`
     /// and Claude stores a Keychain item; Ollama needs no account.
     var detectsSignIn: Bool { self == .openai || self == .claude }
+
+    /// The shell install command, for script-based installs (nil for Ollama,
+    /// which is installed from its download page).
+    var installCommand: String? {
+        if case .script(let command) = install { return command }
+        return nil
+    }
 }
 
 struct ProviderStatus: Equatable {
@@ -245,6 +252,35 @@ struct ProviderSetupView: View {
             }
             .buttonStyle(.bordered)
             .disabled(busy)
+            if let command = provider.installCommand {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(
+                        status.installed
+                            ? "Install command (to reinstall or update):"
+                            : "Install it — click Install above, or run in Terminal:"
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(command)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(Color.secondary.opacity(0.12)))
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(command, forType: .string)
+                            setup.message = "Copied install command."
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy install command")
+                    }
+                }
+            }
             if ollamaDown {
                 Label(
                     "Ollama isn't running — the assistant can't reach it. "
