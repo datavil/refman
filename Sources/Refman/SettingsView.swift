@@ -32,6 +32,7 @@ enum SettingsKeys {
     static let claudeModel = "claudeModel"
     static let openaiModel = "openaiModel"
     static let highlightPalette = "highlightPalette"
+    static let highlightOpacity = "highlightOpacity"
     static let citationStyle = "citationStyle"
     static let contactEmail = "contactEmail"
     static let libraryRootPath = "libraryRootPath"

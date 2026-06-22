@@ -1,3 +1,4 @@
+import CoreImage
 import PDFKit
 import RefmanCore
 import SwiftUI
@@ -14,11 +15,14 @@ struct ReaderView: View {
     @State private var pendingAction: AssistantAction?
     @AppStorage(SettingsKeys.highlightPalette)
     private var highlightPalette = AnnotationOptions.defaultPalette
+    @AppStorage(SettingsKeys.highlightOpacity)
+    private var highlightOpacity = 1.0
+    @State private var showTooltipConfig = false
 
     var body: some View {
         HSplitView {
             if showAnnotations {
-                AnnotationSidebar(reader: reader)
+                ReaderSidebar(reader: reader)
                     .frame(width: 320)
             }
             ZStack(alignment: .topLeading) {
@@ -65,7 +69,35 @@ struct ReaderView: View {
                     Label("Annotations", systemImage: "sidebar.left")
                 }
             }
+            ToolbarItem(placement: .principal) {
+                ReaderSearchBar(reader: reader)
+            }
             ToolbarItemGroup {
+                PageIndicator(reader: reader)
+
+                HStack(spacing: 2) {
+                    Button { reader.zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
+                        .help("Zoom out")
+                    Button { reader.fitWidth() } label: {
+                        Image(systemName: "arrow.left.and.right")
+                    }
+                    .help("Fit width")
+                    Button { reader.zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
+                        .help("Zoom in")
+                }
+
+                Menu {
+                    Picker("Reading Mode", selection: $reader.readingMode) {
+                        ForEach(ReadingMode.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    Divider()
+                    Toggle("Two-Up Layout", isOn: $reader.twoUp)
+                } label: {
+                    Label("View", systemImage: "book")
+                }
+                .help("Reading mode and page layout")
+
                 HStack(spacing: 7) {
                     Button {
                         reader.highlighterMode.toggle()
@@ -100,14 +132,34 @@ struct ReaderView: View {
                 }
                 .padding(.horizontal, 2)
 
-                Menu {
-                    ForEach(AnnotationOptions.colors, id: \.hex) { entry in
-                        Toggle(entry.name, isOn: paletteToggle(entry.hex))
-                    }
+                Button {
+                    showTooltipConfig.toggle()
                 } label: {
                     Label("Tooltip Colors", systemImage: "paintpalette")
                 }
-                .help("Choose which colors the highlight and underline tooltip offers")
+                .help("Choose the colors and opacity for highlight and underline markups")
+                .popover(isPresented: $showTooltipConfig, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(AnnotationOptions.colors, id: \.hex) { entry in
+                            Toggle(entry.name, isOn: paletteToggle(entry.hex))
+                        }
+                        Divider()
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Opacity")
+                                Spacer()
+                                Text(
+                                    highlightOpacity,
+                                    format: .percent.precision(.fractionLength(0)))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(value: $highlightOpacity, in: 0.15...1)
+                        }
+                    }
+                    .padding(14)
+                    .frame(width: 220)
+                }
 
                 Spacer()
 
@@ -128,6 +180,14 @@ struct ReaderView: View {
             Button(action: reader.redo) {}
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!reader.canRedo)
+                .opacity(0)
+                .allowsHitTesting(false)
+            Button { reader.cycleAnnotation(forward: true) } label: {}
+                .keyboardShortcut("]", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+            Button { reader.cycleAnnotation(forward: false) } label: {}
+                .keyboardShortcut("[", modifiers: .command)
                 .opacity(0)
                 .allowsHitTesting(false)
         }
@@ -182,7 +242,29 @@ enum AnnotationOptions {
         ("Orange", "#FF9500"),
         ("Purple", "#AF52DE"),
     ]
-    static let defaultPalette = "#FFCC00,#34C759,#FF2D55,#007AFF"
+    static let defaultPalette = "#FFCC00,#34C759,#FF2D55,#007AFF,#FF9500,#AF52DE"
+}
+
+/// Page reading tint for comfort.
+enum ReadingMode: String, CaseIterable, Identifiable {
+    case off, sepia, dark
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .off: return "Off"
+        case .sepia: return "Sepia"
+        case .dark: return "Dark"
+        }
+    }
+}
+
+/// A flattened table-of-contents entry.
+struct OutlineItem: Identifiable {
+    let id = UUID()
+    let label: String
+    let depth: Int
+    let pageIndex: Int?
+    let destination: PDFDestination?
 }
 
 /// Owns the PDFDocument, mirrors annotations to the repository, persists the PDF.
@@ -212,6 +294,29 @@ final class ReaderModel: ObservableObject {
     /// Whether there's a markup action that Cmd+Z / Cmd+Shift+Z can act on.
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
+    /// Document's table of contents, flattened; empty when the PDF has none.
+    @Published private(set) var outline: [OutlineItem] = []
+    /// In-document search state.
+    @Published var searchText = ""
+    @Published private(set) var searchMatches: [PDFSelection] = []
+    @Published private(set) var searchActiveIndex = 0
+    /// Reading comfort tint applied to the page; re-applied on change.
+    @Published var readingMode: ReadingMode = .off { didSet { applyReadingMode() } }
+    /// Single-page vs two-up continuous layout.
+    @Published var twoUp = false {
+        didSet { pdfView?.displayMode = twoUp ? .twoUpContinuous : .singlePageContinuous }
+    }
+
+    /// Number of pages in the open document.
+    var pageCount: Int { pdfDocument?.pageCount ?? 0 }
+
+    /// What `copySelection` puts on the pasteboard.
+    enum CopyMode { case plain, inline, full }
+
+    /// Source metadata for citation-aware copy.
+    private var documentDetails: DocumentDetails?
+    /// Position remembered by `cycleAnnotation`.
+    private var cyclePosition: Int?
 
     /// A reversible markup edit, recording what the user did.
     private enum MarkupAction {
@@ -247,6 +352,8 @@ final class ReaderModel: ObservableObject {
         pdfDocument = doc
         fileURL = url
         title = details.document.title
+        documentDetails = details
+        outline = Self.buildOutline(doc)
         annotations = (try? model.repository.annotations(documentId: documentId)) ?? []
         colorLabels = (try? model.repository.colorLabels(documentId: documentId)) ?? [:]
     }
@@ -322,6 +429,159 @@ final class ReaderModel: ObservableObject {
         if idx != currentPageIndex { currentPageIndex = idx }
     }
 
+    // MARK: - Search
+
+    /// Re-runs the document search for the current `searchText`. Matches are
+    /// highlighted in the page; the active one is scrolled into view.
+    func runSearch() {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard let doc = pdfDocument, q.count >= 2 else {
+            searchMatches = []
+            searchActiveIndex = 0
+            pdfView?.highlightedSelections = nil
+            return
+        }
+        let matches = doc.findString(q, withOptions: [.caseInsensitive, .diacriticInsensitive])
+        for m in matches { m.color = .systemYellow }
+        searchMatches = matches
+        searchActiveIndex = 0
+        pdfView?.highlightedSelections = matches.isEmpty ? nil : matches
+        if !matches.isEmpty { focusMatch() }
+    }
+
+    func nextMatch() {
+        guard !searchMatches.isEmpty else { return }
+        searchActiveIndex = (searchActiveIndex + 1) % searchMatches.count
+        focusMatch()
+    }
+
+    func prevMatch() {
+        guard !searchMatches.isEmpty else { return }
+        searchActiveIndex = (searchActiveIndex - 1 + searchMatches.count) % searchMatches.count
+        focusMatch()
+    }
+
+    /// Tints the active match brighter than the rest and scrolls to it without
+    /// disturbing the user's text selection.
+    private func focusMatch() {
+        for (i, m) in searchMatches.enumerated() {
+            m.color = i == searchActiveIndex ? .systemOrange : .systemYellow
+        }
+        pdfView?.highlightedSelections = searchMatches
+        let sel = searchMatches[searchActiveIndex]
+        if let page = sel.pages.first {
+            pdfView?.go(to: sel.bounds(for: page), on: page)
+        }
+    }
+
+    // MARK: - Navigation, zoom, layout
+
+    func goToPage(_ index: Int) {
+        guard let doc = pdfDocument, index >= 0, index < doc.pageCount,
+            let page = doc.page(at: index)
+        else { return }
+        pdfView?.go(
+            to: PDFDestination(page: page, at: NSPoint(x: 0, y: page.bounds(for: .mediaBox).maxY)))
+    }
+
+    func zoomIn() {
+        guard let v = pdfView else { return }
+        v.autoScales = false
+        v.scaleFactor = min(v.scaleFactor * 1.15, v.maxScaleFactor)
+    }
+
+    func zoomOut() {
+        guard let v = pdfView else { return }
+        v.autoScales = false
+        v.scaleFactor = max(v.scaleFactor / 1.15, v.minScaleFactor)
+    }
+
+    /// Returns to width-fitting auto scaling.
+    func fitWidth() { pdfView?.autoScales = true }
+
+    /// Applies the current reading tint to the page via Core Image content
+    /// filters; `.off` clears them.
+    func applyReadingMode() {
+        guard let v = pdfView else { return }
+        v.wantsLayer = true
+        switch readingMode {
+        case .off:
+            v.contentFilters = []
+            v.backgroundColor = .windowBackgroundColor
+        case .sepia:
+            let f = CIFilter(name: "CISepiaTone")
+            f?.setValue(0.55, forKey: kCIInputIntensityKey)
+            v.contentFilters = f.map { [$0] } ?? []
+            v.backgroundColor = NSColor(srgbRed: 0.96, green: 0.93, blue: 0.86, alpha: 1)
+        case .dark:
+            v.contentFilters = CIFilter(name: "CIColorInvert").map { [$0] } ?? []
+            v.backgroundColor = .black
+        }
+    }
+
+    // MARK: - Outline (table of contents)
+
+    func go(to item: OutlineItem) {
+        if let dest = item.destination {
+            pdfView?.go(to: dest)
+        } else if let index = item.pageIndex {
+            goToPage(index)
+        }
+    }
+
+    /// Flattens the PDF's outline tree into a depth-tagged list.
+    private static func buildOutline(_ doc: PDFDocument) -> [OutlineItem] {
+        guard let root = doc.outlineRoot else { return [] }
+        var items: [OutlineItem] = []
+        func walk(_ node: PDFOutline, depth: Int) {
+            for i in 0..<node.numberOfChildren {
+                guard let child = node.child(at: i) else { continue }
+                let label = child.label ?? ""
+                let dest = child.destination
+                let pageIndex = dest?.page.map { doc.index(for: $0) }
+                if !label.isEmpty {
+                    items.append(
+                        OutlineItem(
+                            label: label, depth: depth, pageIndex: pageIndex, destination: dest))
+                }
+                walk(child, depth: depth + 1)
+            }
+        }
+        walk(root, depth: 0)
+        return items
+    }
+
+    // MARK: - Copy
+
+    /// Copies the current selection, optionally with a formatted citation
+    /// (in-text for `.inline`, full reference for `.full`).
+    func copySelection(_ mode: CopyMode) {
+        guard let text = pdfView?.currentSelection?.string, !text.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        guard mode != .plain, let details = documentDetails else {
+            pb.setString(text, forType: .string)
+            return
+        }
+        let style = Citeproc.Style(
+            rawValue: UserDefaults.standard.string(forKey: SettingsKeys.citationStyle) ?? "")
+            ?? .apa
+        let citeMode: Citeproc.Mode = mode == .inline ? .citation : .bibliography
+        let citation = (try? Citeproc.format([details], style: style, mode: citeMode)) ?? ""
+        pb.setString(citation.isEmpty ? text : "“\(text)”\n\n\(citation)", forType: .string)
+    }
+
+    // MARK: - Cycle annotations
+
+    func cycleAnnotation(forward: Bool) {
+        guard !annotations.isEmpty else { return }
+        let base = cyclePosition ?? (forward ? -1 : 0)
+        let next = ((base + (forward ? 1 : -1)) % annotations.count + annotations.count)
+            % annotations.count
+        cyclePosition = next
+        jump(to: annotations[next])
+    }
+
     // MARK: - Clicking annotations in the PDF
 
     func markupClicked(_ pdfAnn: PDFAnnotation, on page: PDFPage) {
@@ -373,6 +633,27 @@ final class ReaderModel: ObservableObject {
 
     // MARK: - Annotation creation
 
+    /// User-chosen render opacity for markups; render-time only, so the stored
+    /// colorHex stays RGB. Defaults to fully opaque.
+    var highlightOpacity: CGFloat {
+        CGFloat(UserDefaults.standard.object(forKey: SettingsKeys.highlightOpacity) as? Double ?? 1)
+    }
+
+    /// Re-applies the given opacity to every markup in the open document and
+    /// repaints. Replaces the alpha only; the RGB is preserved.
+    func applyOpacity(_ opacity: CGFloat) {
+        guard let doc = pdfDocument else { return }
+        for i in 0..<doc.pageCount {
+            guard let page = doc.page(at: i) else { continue }
+            for ann in page.annotations where ann.type == "Highlight" || ann.type == "Underline" {
+                guard let base = ann.color.usingColorSpace(.sRGB) else { continue }
+                ann.color = base.withAlphaComponent(opacity)
+            }
+            pdfView?.annotationsChanged(on: page)
+        }
+        pdfView?.needsDisplay = true
+    }
+
     func addHighlight(color: NSColor) {
         addMarkup(kind: .highlight, subtype: .highlight, color: color)
     }
@@ -409,7 +690,7 @@ final class ReaderModel: ObservableObject {
             let union = selection.bounds(for: page)
             let pdfAnnotation = PDFAnnotation(
                 bounds: union, forType: subtype, withProperties: nil)
-            pdfAnnotation.color = color
+            pdfAnnotation.color = color.withAlphaComponent(highlightOpacity)
             pdfAnnotation.quadrilateralPoints = quads.flatMap { quad in
                 stride(from: 0, to: quad.count, by: 2).map { i in
                     // PDFKit wants points relative to the annotation bounds origin.
@@ -487,7 +768,8 @@ final class ReaderModel: ObservableObject {
         let subtype: PDFAnnotationSubtype = annotation.kind == .underline ? .underline : .highlight
 
         let pdfAnnotation = PDFAnnotation(bounds: union, forType: subtype, withProperties: nil)
-        pdfAnnotation.color = NSColor(hex: annotation.colorHex) ?? .systemYellow
+        pdfAnnotation.color = (NSColor(hex: annotation.colorHex) ?? .systemYellow)
+            .withAlphaComponent(highlightOpacity)
         pdfAnnotation.quadrilateralPoints = quads.flatMap { quad in
             stride(from: 0, to: quad.count, by: 2).map { i in
                 NSValue(point: NSPoint(x: quad[i] - union.minX, y: quad[i + 1] - union.minY))
@@ -532,6 +814,25 @@ final class ReaderModel: ObservableObject {
             savePDF()
         }
         annotations = (try? model.repository.annotations(documentId: documentId)) ?? annotations
+    }
+
+    /// Changes an existing markup's color in the page and the database.
+    func recolor(_ annotation: RefmanCore.Annotation, to color: NSColor) {
+        guard let model, let doc = pdfDocument, let page = doc.page(at: annotation.pageIndex),
+            let pdfAnn = pdfAnnotation(for: annotation, on: page)
+        else { return }
+        pdfAnn.color = color.withAlphaComponent(highlightOpacity)
+        pdfView?.annotationsChanged(on: page)
+        pdfView?.needsDisplay = true
+        var updated = annotation
+        updated.colorHex = color.hexString
+        updated.modifiedAt = Date()
+        try? model.repository.database.dbWriter.write { db in try updated.update(db) }
+        if let i = annotations.firstIndex(where: { $0.uuid == annotation.uuid }) {
+            annotations[i] = updated
+        }
+        if clickedAnnotation?.uuid == annotation.uuid { clickedAnnotation = updated }
+        savePDF()
     }
 
     /// Delete via the PDF annotation (context-menu removal in the viewer).
@@ -688,6 +989,7 @@ final class MarkupClickPDFView: PDFView {
 /// NSViewRepresentable wrapper around PDFView.
 struct PDFKitView: NSViewRepresentable {
     @ObservedObject var reader: ReaderModel
+    @AppStorage(SettingsKeys.highlightOpacity) private var highlightOpacity = 1.0
 
     func makeNSView(context: Context) -> PDFView {
         let view = MarkupClickPDFView()
@@ -730,6 +1032,12 @@ struct PDFKitView: NSViewRepresentable {
     func updateNSView(_ view: PDFView, context: Context) {
         if view.document !== reader.pdfDocument {
             view.document = reader.pdfDocument
+            context.coordinator.lastOpacity = nil
+        }
+        // Apply on first display and whenever the Settings slider changes.
+        if context.coordinator.lastOpacity != highlightOpacity {
+            context.coordinator.lastOpacity = highlightOpacity
+            reader.applyOpacity(CGFloat(highlightOpacity))
         }
     }
 
@@ -740,6 +1048,7 @@ struct PDFKitView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         let reader: ReaderModel
+        var lastOpacity: Double?
         init(reader: ReaderModel) { self.reader = reader }
 
         @objc func selectionChanged() {
@@ -753,6 +1062,73 @@ struct PDFKitView: NSViewRepresentable {
         @objc func pageChanged() {
             reader.pageChanged()
         }
+    }
+}
+
+/// Toolbar in-document search: live match count with prev/next navigation.
+struct ReaderSearchBar: View {
+    @ObservedObject var reader: ReaderModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            TextField("Search", text: $reader.searchText)
+                .textFieldStyle(.plain)
+                .frame(width: 150)
+                .onSubmit { reader.nextMatch() }
+            if !reader.searchText.isEmpty {
+                Text(
+                    reader.searchMatches.isEmpty
+                        ? "0"
+                        : "\(reader.searchActiveIndex + 1)/\(reader.searchMatches.count)"
+                )
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            }
+            Button { reader.prevMatch() } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.plain)
+                .disabled(reader.searchMatches.isEmpty)
+            Button { reader.nextMatch() } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.plain)
+                .disabled(reader.searchMatches.isEmpty)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+        .frame(width: 280)
+        .onChange(of: reader.searchText) { reader.runSearch() }
+    }
+}
+
+/// Toolbar page-number field with total; jumps to the typed page on submit and
+/// follows the visible page while scrolling.
+struct PageIndicator: View {
+    @ObservedObject var reader: ReaderModel
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TextField("", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.center)
+                .frame(width: 40)
+                .focused($focused)
+                .onSubmit { if let n = Int(text) { reader.goToPage(n - 1) } }
+            Text("/ \(reader.pageCount)")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .onChange(of: reader.currentPageIndex) { syncText() }
+        .onChange(of: focused) { if !focused { syncText() } }
+        .onAppear { syncText() }
+    }
+
+    private func syncText() {
+        if !focused { text = String(reader.currentPageIndex + 1) }
     }
 }
 
@@ -809,6 +1185,19 @@ struct SelectionPen: View {
 
             separator
 
+            Menu {
+                Button("Copy") { reader.copySelection(.plain) }
+                Button("Copy with Citation (in-text)") { reader.copySelection(.inline) }
+                Button("Copy with Citation") { reader.copySelection(.full) }
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Copy the selection, optionally with a formatted citation")
+
+            separator
+
             Button {
                 reader.askAI()
             } label: {
@@ -833,28 +1222,128 @@ struct SelectionPen: View {
     }
 }
 
-/// Floating action shown when the user clicks an existing highlight/underline.
+/// Floating action shown when the user clicks an existing highlight/underline:
+/// recolor swatches and remove.
 struct AnnotationBubble: View {
     @ObservedObject var reader: ReaderModel
     let annotation: RefmanCore.Annotation
+    @AppStorage(SettingsKeys.highlightPalette)
+    private var highlightPalette = AnnotationOptions.defaultPalette
+
+    private var paletteColors: [(name: String, color: NSColor)] {
+        highlightPalette.split(separator: ",").compactMap { hex in
+            guard AnnotationOptions.colors.contains(where: { $0.hex == hex }),
+                let color = NSColor(hex: String(hex))
+            else { return nil }
+            return (reader.label(forHex: String(hex)), color)
+        }
+    }
 
     var body: some View {
-        Button {
-            reader.clearClickedAnnotation()
-            reader.delete(annotation)
-        } label: {
-            Label("Remove", systemImage: "trash")
-                .font(.system(size: 12, weight: .medium))
+        HStack(spacing: 10) {
+            ForEach(paletteColors, id: \.name) { entry in
+                Button {
+                    reader.recolor(annotation, to: entry.color)
+                } label: {
+                    Circle()
+                        .fill(Color(nsColor: entry.color))
+                        .frame(width: 13, height: 13)
+                        .overlay {
+                            if annotation.colorHex == entry.color.hexString {
+                                Circle().strokeBorder(.primary, lineWidth: 1.5)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .help("Recolor: \(entry.name)")
+            }
+
+            Rectangle().fill(.quaternary).frame(width: 1, height: 18)
+
+            Button {
+                reader.clearClickedAnnotation()
+                reader.delete(annotation)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Remove this annotation")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .help("Remove this annotation")
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(
             Color(nsColor: .controlBackgroundColor),
             in: RoundedRectangle(cornerRadius: 10))
         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+}
+
+/// Left sidebar: a segmented Outline / Annotations switch when the PDF has a
+/// table of contents, otherwise just the annotations list.
+struct ReaderSidebar: View {
+    @ObservedObject var reader: ReaderModel
+    @State private var tab = Tab.annotations
+
+    enum Tab { case outline, annotations }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !reader.outline.isEmpty {
+                Picker("", selection: $tab) {
+                    Text("Outline").tag(Tab.outline)
+                    Text("Annotations").tag(Tab.annotations)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                Divider()
+            }
+            if tab == .outline, !reader.outline.isEmpty {
+                OutlineList(reader: reader)
+            } else {
+                AnnotationSidebar(reader: reader)
+            }
+        }
+    }
+}
+
+/// The document's table of contents; click an entry to jump there.
+struct OutlineList: View {
+    @ObservedObject var reader: ReaderModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(reader.outline) { item in
+                    Button {
+                        reader.go(to: item)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(item.label)
+                                .font(.callout)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 4)
+                            if let page = item.pageIndex {
+                                Text("\(page + 1)")
+                                    .font(.caption)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.leading, CGFloat(item.depth) * 14)
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
+            }
+        }
     }
 }
 
