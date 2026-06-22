@@ -169,6 +169,13 @@ public enum BibTeX {
     }
 
     public static func export(_ item: DocumentDetails) -> String {
+        export(item, file: nil)
+    }
+
+    /// Exports one entry, optionally writing `file` with a relative attachment
+    /// path (JabRef `description:path:type` form, which Zotero and Mendeley
+    /// both read on import).
+    public static func export(_ item: DocumentDetails, file: String?) -> String {
         let d = item.document
         let bibType: String
         switch d.type {
@@ -204,6 +211,7 @@ public enum BibTeX {
             fields.append(("archiveprefix", "arXiv"))
         }
         if let url = d.url { fields.append(("url", url)) }
+        if let file { fields.append(("file", ":\(file):PDF")) }
 
         let body = fields
             .map { "  \($0.0) = {\($0.1)}" }

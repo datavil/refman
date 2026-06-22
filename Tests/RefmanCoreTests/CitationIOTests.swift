@@ -71,6 +71,17 @@ import Testing
         #expect(authors.map(\.family) == ["Lovelace"])
     }
 
+    @Test func exportWritesAttachmentFileField() {
+        let details = DocumentDetails(
+            document: Document(type: .article, title: "A Study of Things", year: 2020),
+            authors: [Author(given: "Ada", family: "Lovelace")]
+        )
+        let exported = BibTeX.export(details, file: "files/lovelace2020study.pdf")
+        #expect(exported.contains("file = {:files/lovelace2020study.pdf:PDF}"))
+        // Plain export stays attachment-free.
+        #expect(!BibTeX.export(details).contains("file ="))
+    }
+
     @Test func citationKeyGeneration() {
         let details = DocumentDetails(
             document: Document(title: "The Quick Brown Fox", year: 2021),

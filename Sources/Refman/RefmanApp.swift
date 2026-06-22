@@ -51,7 +51,11 @@ struct RefmanApp: App {
                     .keyboardShortcut("i", modifiers: [.command])
                 Button("Import BibTeX/RIS…") { model.importBibliographyViaPanel() }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
+                Button("Import from Folder…") { model.importFromFolderViaPanel() }
                 Divider()
+                Button("Export Library with PDFs…") {
+                    model.exportBundleViaPanel(collectionId: nil)
+                }
                 Button("Export Library as BibTeX…") { model.exportViaPanel(format: .bibtex) }
                 Button("Export Library as RIS…") { model.exportViaPanel(format: .ris) }
                 Button("Export Library as CSL-JSON…") { model.exportViaPanel(format: .cslJSON) }

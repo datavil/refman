@@ -40,6 +40,110 @@ import Testing
     }
 }
 
+@Suite struct LibraryBundleTests {
+    @Test func exportsBibAndCopiesAttachedPDFs() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("BundleTest-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tmp) }
+        let store = try LibraryStore(rootURL: tmp.appendingPathComponent("store"))
+
+        let pdfData = Data("fake pdf".utf8)
+        let hash = try store.ingest(data: pdfData)
+        // Mirror the real store: its PDFs carry the Finder hidden flag.
+        var hiddenValues = URLResourceValues()
+        hiddenValues.isHidden = true
+        var stored = store.url(forHash: hash)
+        try stored.setResourceValues(hiddenValues)
+        let withPDF = DocumentDetails(
+            document: Document(title: "Attached Paper", year: 2021, fileHash: hash),
+            authors: [Author(family: "Doe")])
+        let noPDF = DocumentDetails(
+            document: Document(title: "Metadata Only", year: 2020),
+            authors: [Author(family: "Roe")])
+
+        let bundle = tmp.appendingPathComponent("Export")
+        let result = try LibraryBundle.export([withPDF, noPDF], store: store, to: bundle)
+
+        #expect(result.references == 2)
+        #expect(result.pdfs == 1)
+        #expect(result.notDownloaded == 0)
+        #expect(result.copyErrors.isEmpty)
+        // PDF sits in the bundle root next to library.bib, not a subfolder.
+        let exportedPDF = bundle.appendingPathComponent("doe2021attached.pdf")
+        #expect(try Data(contentsOf: exportedPDF) == pdfData)
+        #expect(!fm.fileExists(atPath: bundle.appendingPathComponent("files").path))
+        // The export must be visible in Finder, not inherit the store's hidden flag.
+        #expect(try exportedPDF.resourceValues(forKeys: [.isHiddenKey]).isHidden == false)
+
+        let bib = try String(
+            contentsOf: bundle.appendingPathComponent("library.bib"), encoding: .utf8)
+        #expect(bib.contains("file = {:doe2021attached.pdf:PDF}"))
+        // The metadata-only entry gets no file field.
+        #expect(bib.contains("Metadata Only"))
+    }
+
+    @Test func endToEndExportFromRepository() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("E2EBundle-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tmp) }
+        let store = try LibraryStore(rootURL: tmp.appendingPathComponent("store"))
+        let repo = try LibraryRepository(AppDatabase.inMemory())
+
+        // Mirror the real flow: a PDF lands in the store, the document records its hash.
+        let hash = try store.ingest(data: Data("real pdf bytes".utf8))
+        _ = try repo.insert(
+            Document(title: "Indexed Paper", year: 2021, fileHash: hash),
+            authors: [Author(family: "Curie")])
+
+        // The export reads documents back through the repository, as the app does.
+        let items = try repo.allDocuments()
+        #expect(items.first?.document.fileHash == hash)  // survives the round trip
+
+        let bundle = tmp.appendingPathComponent("Export")
+        let result = try LibraryBundle.export(items, store: store, to: bundle)
+        #expect(result.pdfs == 1)
+        #expect(
+            fm.fileExists(atPath: bundle.appendingPathComponent("curie2021indexed.pdf").path))
+    }
+
+    @Test func bundleWithRISWritesBothFormats() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("BundleTest-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tmp) }
+        let store = try LibraryStore(rootURL: tmp.appendingPathComponent("store"))
+        let item = DocumentDetails(
+            document: Document(title: "Paper", year: 2021), authors: [Author(family: "Doe")])
+
+        let bundle = tmp.appendingPathComponent("Export")
+        _ = try LibraryBundle.export([item], store: store, to: bundle, includeRIS: true)
+
+        #expect(fm.fileExists(atPath: bundle.appendingPathComponent("library.bib").path))
+        #expect(fm.fileExists(atPath: bundle.appendingPathComponent("library.ris").path))
+        // Default (no RIS) omits the .ris file.
+        let plain = tmp.appendingPathComponent("Plain")
+        _ = try LibraryBundle.export([item], store: store, to: plain)
+        #expect(!fm.fileExists(atPath: plain.appendingPathComponent("library.ris").path))
+    }
+
+    @Test func exportReplacesExistingBundle() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("BundleTest-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tmp) }
+        let store = try LibraryStore(rootURL: tmp.appendingPathComponent("store"))
+        let bundle = tmp.appendingPathComponent("Export")
+
+        // Pre-existing folder with stale content should be cleared.
+        try fm.createDirectory(at: bundle, withIntermediateDirectories: true)
+        try Data("stale".utf8).write(to: bundle.appendingPathComponent("stale.txt"))
+
+        let item = DocumentDetails(
+            document: Document(title: "Paper", year: 2021), authors: [Author(family: "Doe")])
+        _ = try LibraryBundle.export([item], store: store, to: bundle)
+
+        #expect(!fm.fileExists(atPath: bundle.appendingPathComponent("stale.txt").path))
+    }
+}
+
 @Suite struct LibraryLocationTests {
     @Test func relocateMovesDatabaseAndStorage() throws {
         let fm = FileManager.default

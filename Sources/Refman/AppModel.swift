@@ -316,20 +316,34 @@ final class AppModel: ObservableObject {
 
     // MARK: - Export
 
-    func exportViaPanel(format: ExportFormat) {
+    func exportViaPanel(format: ExportFormat, collectionId: Int64? = nil, name: String? = nil) {
+        exportViaPanel(
+            format: format, items: (try? repository.allDocuments(in: collectionId)) ?? [], name: name)
+    }
+
+    func exportViaPanel(format: ExportFormat, documentIds ids: [Int64]) {
+        exportViaPanel(
+            format: format, items: ids.compactMap { try? repository.document(id: $0) }, name: nil)
+    }
+
+    private func exportViaPanel(format: ExportFormat, items: [DocumentDetails], name: String?) {
+        guard !items.isEmpty else {
+            statusMessage = "Nothing to export."
+            return
+        }
         do {
-            let items = try repository.allDocuments()
+            let base = exportBaseName(name)
             let panel = NSSavePanel()
             let data: Data
             switch format {
             case .bibtex:
-                panel.nameFieldStringValue = "library.bib"
+                panel.nameFieldStringValue = "\(base).bib"
                 data = Data(BibTeX.export(items).utf8)
             case .ris:
-                panel.nameFieldStringValue = "library.ris"
+                panel.nameFieldStringValue = "\(base).ris"
                 data = Data(RIS.export(items).utf8)
             case .cslJSON:
-                panel.nameFieldStringValue = "library.json"
+                panel.nameFieldStringValue = "\(base).json"
                 data = try CSLJSON.export(items)
             }
             guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -338,6 +352,130 @@ final class AppModel: ObservableObject {
         } catch {
             statusMessage = "Export failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Exports the whole library (nil) or one collection as a portable folder.
+    func exportBundleViaPanel(collectionId: Int64?, name: String? = nil, includeRIS: Bool = false) {
+        exportBundleViaPanel(
+            items: (try? repository.allDocuments(in: collectionId)) ?? [],
+            name: name, includeRIS: includeRIS)
+    }
+
+    /// Exports an explicit set of documents (a selection or single paper).
+    func exportBundleViaPanel(documentIds ids: [Int64], includeRIS: Bool = false) {
+        exportBundleViaPanel(
+            items: ids.compactMap { try? repository.document(id: $0) },
+            name: nil, includeRIS: includeRIS)
+    }
+
+    /// Writes `items` as a portable folder: `library.bib` (and optionally
+    /// `library.ris`) plus the attached PDFs, linked by relative path so
+    /// Zotero/Mendeley import them.
+    private func exportBundleViaPanel(items: [DocumentDetails], name: String?, includeRIS: Bool) {
+        guard !items.isEmpty else {
+            statusMessage = "Nothing to export."
+            return
+        }
+        do {
+            let panel = NSSavePanel()
+            panel.title = "Export with PDFs"
+            panel.message = "Choose where to save the export folder"
+            panel.nameFieldLabel = "Folder name:"
+            panel.nameFieldStringValue = exportBaseName(name)
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let bundle = panel.url else { return }
+
+            let result = try LibraryBundle.export(
+                items, store: store, to: bundle, includeRIS: includeRIS)
+            var message =
+                "Exported \(result.references) reference\(result.references == 1 ? "" : "s") "
+                + "with \(result.pdfs) PDF\(result.pdfs == 1 ? "" : "s")"
+            if result.notDownloaded > 0 {
+                message += " — \(result.notDownloaded) not yet downloaded from iCloud; "
+                    + "try again shortly"
+            }
+            if let firstError = result.copyErrors.first {
+                message += " — couldn't copy \(result.copyErrors.count): \(firstError)"
+            }
+            statusMessage = message
+            NSWorkspace.shared.activateFileViewerSelecting([bundle])
+        } catch {
+            statusMessage = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Imports a folder: an exported bundle (a `.bib` whose `file` fields point
+    /// to PDFs in `files/`) attaches its PDFs; a folder of loose PDFs goes
+    /// through the normal import pipeline. Imported docs join `collectionId`.
+    func importFromFolderViaPanel(collectionId: Int64? = nil) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+
+        let fm = FileManager.default
+        let contents = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil))
+            ?? []
+
+        if let bib = contents.first(where: { $0.pathExtension.lowercased() == "bib" }),
+            let text = try? String(contentsOf: bib, encoding: .utf8)
+        {
+            var count = 0
+            var withPDF = 0
+            for entry in BibTeX.parse(text) {
+                let (parsed, authors) = BibTeX.document(from: entry)
+                var doc = parsed
+                if let rel = entry.fields["file"].flatMap(Self.attachmentPath) {
+                    let pdf = folder.appendingPathComponent(rel)
+                    if let hash = try? store.ingest(fileAt: pdf) {
+                        doc.fileHash = hash
+                        doc.fileName = pdf.lastPathComponent
+                        withPDF += 1
+                    }
+                }
+                if let doi = doc.doi, (try? repository.document(doi: doi)) != nil { continue }
+                if let saved = try? repository.insert(doc, authors: authors) {
+                    count += 1
+                    if let cid = collectionId, let id = saved.document.id {
+                        try? repository.add(documentId: id, toCollection: cid)
+                    }
+                }
+            }
+            statusMessage =
+                "Imported \(count) reference\(count == 1 ? "" : "s") "
+                + "with \(withPDF) PDF\(withPDF == 1 ? "" : "s")"
+            reload()
+        } else {
+            let nested =
+                (try? fm.contentsOfDirectory(
+                    at: folder.appendingPathComponent("files"), includingPropertiesForKeys: nil))
+                ?? []
+            let pdfs = (contents + nested).filter { $0.pathExtension.lowercased() == "pdf" }
+            guard !pdfs.isEmpty else {
+                statusMessage = "No .bib file or PDFs found in that folder."
+                return
+            }
+            importPDFs(at: pdfs)
+        }
+    }
+
+    /// Extracts the path from a BibTeX `file` field, accepting both a bare path
+    /// and the JabRef `description:path:type` triple.
+    private static func attachmentPath(from field: String) -> String? {
+        let parts = field.components(separatedBy: ":")
+        let path = parts.count >= 3 ? parts[1] : field
+        return path.isEmpty ? nil : path
+    }
+
+    /// Export base name: a sanitized provided name (e.g. a collection's), or
+    /// `refman-<unix time>` when none is given.
+    private func exportBaseName(_ name: String?) -> String {
+        guard let name else { return "refman-\(Int(Date().timeIntervalSince1970))" }
+        let cleaned = name.components(separatedBy: CharacterSet(charactersIn: "/\\:*?\"<>|"))
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespaces)
+        return cleaned.isEmpty ? "refman-\(Int(Date().timeIntervalSince1970))" : cleaned
     }
 
     /// Formats the given documents with citeproc and puts the result on the

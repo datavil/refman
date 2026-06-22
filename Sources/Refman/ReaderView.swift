@@ -997,6 +997,15 @@ final class MarkupClickPDFView: PDFView {
         return super.menu(for: event)
     }
 
+    /// AppKit appends a "Services" submenu to context menus for views that can
+    /// vend a selection to Services; opting out keeps our markup menu clean.
+    override func validRequestor(
+        forSendType sendType: NSPasteboard.PasteboardType?,
+        returnType: NSPasteboard.PasteboardType?
+    ) -> Any? {
+        nil
+    }
+
     @objc private func removeMarkup() {
         guard let (annotation, page) = menuMarkup else { return }
         menuMarkup = nil

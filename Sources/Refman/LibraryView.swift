@@ -188,6 +188,22 @@ struct LibraryView: View {
             Section("Library") {
                 Label("All Documents", systemImage: "books.vertical")
                     .tag(SidebarItem.all)
+                    .contextMenu {
+                        Menu("Export All") {
+                            Button("BibTeX…") {
+                                model.exportViaPanel(format: .bibtex)
+                            }
+                            Button("RIS…") {
+                                model.exportViaPanel(format: .ris)
+                            }
+                            Button("PDFs…") {
+                                model.exportBundleViaPanel(collectionId: nil)
+                            }
+                            Button("RIS + BibTeX + PDFs…") {
+                                model.exportBundleViaPanel(collectionId: nil, includeRIS: true)
+                            }
+                        }
+                    }
                 Label("Recently Added", systemImage: "clock")
                     .tag(SidebarItem.recent)
                 Label("Uncategorized", systemImage: "tray")
@@ -455,6 +471,20 @@ struct LibraryView: View {
                 }
                 copyMenu("Copy Formatted Citation", ids: ids, mode: .bibliography)
                 copyMenu("Copy In-Text Citation", ids: ids, mode: .citation)
+                Menu("Export") {
+                    Button("BibTeX…") {
+                        model.exportViaPanel(format: .bibtex, documentIds: Array(ids))
+                    }
+                    Button("RIS…") {
+                        model.exportViaPanel(format: .ris, documentIds: Array(ids))
+                    }
+                    Button("PDFs…") {
+                        model.exportBundleViaPanel(documentIds: Array(ids))
+                    }
+                    Button("RIS + BibTeX + PDFs…") {
+                        model.exportBundleViaPanel(documentIds: Array(ids), includeRIS: true)
+                    }
+                }
                 Menu("Add to Collection") {
                     ForEach(model.collections, id: \.id) { collection in
                         Button(collection.name) {
@@ -709,6 +739,27 @@ private struct CollectionTree: View {
                 }
                 Button("New Subcollection") {
                     subcollectionParent = collection
+                }
+                Menu("Export") {
+                    Button("BibTeX…") {
+                        model.exportViaPanel(
+                            format: .bibtex, collectionId: collection.id!, name: collection.name)
+                    }
+                    Button("RIS…") {
+                        model.exportViaPanel(
+                            format: .ris, collectionId: collection.id!, name: collection.name)
+                    }
+                    Button("PDFs…") {
+                        model.exportBundleViaPanel(
+                            collectionId: collection.id!, name: collection.name)
+                    }
+                    Button("RIS + BibTeX + PDFs…") {
+                        model.exportBundleViaPanel(
+                            collectionId: collection.id!, name: collection.name, includeRIS: true)
+                    }
+                }
+                Button("Import from Folder…") {
+                    model.importFromFolderViaPanel(collectionId: collection.id!)
                 }
                 Button("Delete Collection", role: .destructive) {
                     collectionToDelete = collection
