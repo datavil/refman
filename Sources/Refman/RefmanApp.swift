@@ -39,7 +39,7 @@ struct RefmanApp: App {
                 .frame(minWidth: 1000, minHeight: 620)
                 .preferredColorScheme(colorScheme)
         }
-        .defaultSize(width: 1600, height: 1000)
+        .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { model.updater.check(userInitiated: true) }
@@ -63,6 +63,9 @@ struct RefmanApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Quick Open…") { model.requestPalette() }
                     .keyboardShortcut("k", modifiers: [.command])
+            }
+            CommandGroup(after: .sidebar) {
+                Button("Reset Layout to Default") { LayoutReset.run() }
             }
             CommandMenu("Library") {
                 Button("Move to Trash") { model.delete(documentIds: Array(model.selectedDocumentIds)) }

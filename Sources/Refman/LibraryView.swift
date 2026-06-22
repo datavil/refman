@@ -67,22 +67,25 @@ struct LibraryView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+                .navigationSplitViewColumnWidth(min: 189, ideal: 240)
                 .toolbar(removing: .sidebarToggle)
         } content: {
             documentTable
                 .navigationSplitViewColumnWidth(min: 400, ideal: 560)
         } detail: {
-            if model.selectedDocumentIds.count > 1 {
-                multiSelectionSummary
-            } else if let details = model.selectedDocument {
-                InspectorView(details: details)
-                    .id(details.document.id)  // reset editing state on selection change
-            } else {
-                ContentUnavailableView(
-                    "No Selection", systemImage: "doc.text",
-                    description: Text("Select a document, or drop PDFs anywhere to import."))
+            Group {
+                if model.selectedDocumentIds.count > 1 {
+                    multiSelectionSummary
+                } else if let details = model.selectedDocument {
+                    InspectorView(details: details)
+                        .id(details.document.id)  // reset editing state on selection change
+                } else {
+                    ContentUnavailableView(
+                        "No Selection", systemImage: "doc.text",
+                        description: Text("Select a document, or drop PDFs anywhere to import."))
+                }
             }
+            .navigationSplitViewColumnWidth(min: 392, ideal: 470)
         }
         .searchable(text: $model.searchText, prompt: "Search title, authors, full text")
         // Defer reloads off the current update cycle: mutating the Table's data
@@ -642,21 +645,97 @@ struct LibraryView: View {
 private struct ToolbarConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        DispatchQueue.main.async { configure(view.window?.toolbar) }
+        DispatchQueue.main.async { configure(view.window) }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { configure(nsView.window?.toolbar) }
+        DispatchQueue.main.async { configure(nsView.window) }
     }
 
-    private func configure(_ toolbar: NSToolbar?) {
-        guard let toolbar else { return }
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-        if #available(macOS 15.0, *) {
-            toolbar.allowsDisplayModeCustomization = false
+    private func configure(_ window: NSWindow?) {
+        guard let window else { return }
+        if let toolbar = window.toolbar {
+            toolbar.displayMode = .iconOnly
+            toolbar.allowsUserCustomization = false
+            if #available(macOS 15.0, *) {
+                toolbar.allowsDisplayModeCustomization = false
+            }
         }
+        // Stop the leading sidebar from collapsing when dragged fully left.
+        // SwiftUI's NavigationSplitView is backed by an NSSplitView whose delegate
+        // is the (private) NSSplitViewController; it isn't in the VC tree, so reach
+        // it via the split view's delegate.
+        guard let split = window.contentView?.firstSplitViewInTree,
+            let splitVC = split.delegate as? NSSplitViewController
+        else { return }
+        for item in splitVC.splitViewItems where item.behavior == .sidebar {
+            item.canCollapse = false
+            item.minimumThickness = 189
+            // SwiftUI's drag handling collapses the sidebar even with canCollapse
+            // = false, so watch isCollapsed and force it back open.
+            SidebarCollapseGuard.attach(to: item)
+        }
+    }
+}
+
+/// Observes a split view item's `isCollapsed` and snaps it back open, defeating
+/// SwiftUI's drag-to-collapse on the library sidebar. Retained on the item.
+private final class SidebarCollapseGuard {
+    private var observation: NSKeyValueObservation?
+
+    static func attach(to item: NSSplitViewItem) {
+        if objc_getAssociatedObject(item, &guardKey) != nil { return }
+        let guardian = SidebarCollapseGuard()
+        guardian.observation = item.observe(\.isCollapsed, options: [.new]) { item, _ in
+            if item.isCollapsed {
+                DispatchQueue.main.async { item.isCollapsed = false }
+            }
+        }
+        objc_setAssociatedObject(item, &guardKey, guardian, .OBJC_ASSOCIATION_RETAIN)
+    }
+}
+
+private var guardKey: UInt8 = 0
+
+/// Restores window size and sidebar widths to their built-in defaults.
+enum LayoutReset {
+    /// Sidebar/inspector ideal widths and the library window's default size.
+    /// Keep these in sync with `navigationSplitViewColumnWidth` and `defaultSize`.
+    static let sidebarWidth: CGFloat = 240
+    static let inspectorWidth: CGFloat = 470
+    static let windowSize = NSSize(width: 1280, height: 800)
+
+    static func run() {
+        // Forget the autosaved geometry so the next launch also starts fresh.
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix("NSWindow Frame") || key.hasPrefix("NSSplitView Subview Frames") {
+            defaults.removeObject(forKey: key)
+        }
+        // Snap the open library window back to defaults now.
+        for window in NSApp.windows {
+            guard let split = window.contentView?.firstSplitViewInTree,
+                split.delegate is NSSplitViewController,
+                split.subviews.count >= 3
+            else { continue }
+            window.setContentSize(windowSize)
+            window.center()
+            split.layoutSubtreeIfNeeded()
+            split.setPosition(sidebarWidth, ofDividerAt: 0)
+            split.setPosition(split.bounds.width - inspectorWidth, ofDividerAt: 1)
+        }
+    }
+}
+
+extension NSView {
+    /// Depth-first search for the first NSSplitView in this subtree.
+    fileprivate var firstSplitViewInTree: NSSplitView? {
+        if let split = self as? NSSplitView { return split }
+        for sub in subviews {
+            if let found = sub.firstSplitViewInTree { return found }
+        }
+        return nil
     }
 }
 
