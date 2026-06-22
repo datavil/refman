@@ -18,6 +18,8 @@ struct ReaderView: View {
     @AppStorage(SettingsKeys.highlightOpacity)
     private var highlightOpacity = 1.0
     @State private var showTooltipConfig = false
+    @State private var showSearch = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         HSplitView {
@@ -38,6 +40,27 @@ struct ReaderView: View {
                     AnnotationBubble(reader: reader, annotation: clicked)
                         .position(x: max(rect.midX, 60), y: max(rect.minY - 22, 16))
                         .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if showSearch {
+                    HStack(spacing: 6) {
+                        ReaderSearchBar(reader: reader, focused: $searchFocused)
+                        Button {
+                            closeSearch()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .keyboardShortcut(.cancelAction)
+                        .help("Close search")
+                    }
+                    .padding(8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+                    .padding(12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
             .frame(minWidth: 500)
@@ -69,21 +92,22 @@ struct ReaderView: View {
                     Label("Annotations", systemImage: "sidebar.left")
                 }
             }
-            ToolbarItem(placement: .principal) {
-                ReaderSearchBar(reader: reader)
-            }
             ToolbarItemGroup {
                 PageIndicator(reader: reader)
 
-                HStack(spacing: 2) {
-                    Button { reader.zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
-                        .help("Zoom out")
+                ControlGroup {
+                    Button { reader.zoomOut() } label: {
+                        Label("Zoom Out", systemImage: "minus.magnifyingglass")
+                    }
+                    .help("Zoom out")
                     Button { reader.fitWidth() } label: {
-                        Image(systemName: "arrow.left.and.right")
+                        Label("Fit Width", systemImage: "arrow.left.and.right")
                     }
                     .help("Fit width")
-                    Button { reader.zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
-                        .help("Zoom in")
+                    Button { reader.zoomIn() } label: {
+                        Label("Zoom In", systemImage: "plus.magnifyingglass")
+                    }
+                    .help("Zoom in")
                 }
 
                 Menu {
@@ -190,6 +214,16 @@ struct ReaderView: View {
                 .keyboardShortcut("[", modifiers: .command)
                 .opacity(0)
                 .allowsHitTesting(false)
+            Button {
+                if showSearch {
+                    searchFocused = true  // already open: just refocus
+                } else {
+                    showSearch = true  // onAppear focuses the field
+                }
+            } label: {}
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
         }
         .onAppear {
             reader.load(documentId: documentId, model: model)
@@ -197,6 +231,12 @@ struct ReaderView: View {
         .onDisappear {
             reader.flushSave()
         }
+    }
+
+    private func closeSearch() {
+        withAnimation(.easeOut(duration: 0.15)) { showSearch = false }
+        reader.searchText = ""
+        reader.runSearch()
     }
 
     private var paletteHexes: [String] {
@@ -1068,6 +1108,7 @@ struct PDFKitView: NSViewRepresentable {
 /// Toolbar in-document search: live match count with prev/next navigation.
 struct ReaderSearchBar: View {
     @ObservedObject var reader: ReaderModel
+    @FocusState.Binding var focused: Bool
 
     var body: some View {
         HStack(spacing: 4) {
@@ -1077,6 +1118,7 @@ struct ReaderSearchBar: View {
             TextField("Search", text: $reader.searchText)
                 .textFieldStyle(.plain)
                 .frame(width: 150)
+                .focused($focused)
                 .onSubmit { reader.nextMatch() }
             if !reader.searchText.isEmpty {
                 Text(
@@ -1100,6 +1142,10 @@ struct ReaderSearchBar: View {
         .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
         .frame(width: 280)
         .onChange(of: reader.searchText) { reader.runSearch() }
+        .onAppear {
+            // Defer a tick: the field isn't in the responder chain yet on appear.
+            DispatchQueue.main.async { focused = true }
+        }
     }
 }
 

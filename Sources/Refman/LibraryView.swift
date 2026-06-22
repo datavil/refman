@@ -98,6 +98,14 @@ struct LibraryView: View {
             }
         }
         .background(ToolbarConfigurator())
+        .background {
+            // Cmd+F focuses the library search field; scoped to this window so
+            // it doesn't shadow the reader's own Cmd+F find bar.
+            Button { focusLibrarySearch() } label: {}
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+        }
         .quickLookPreview($previewURL)
         .task { model.updater.checkInBackgroundIfDue() }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
@@ -550,6 +558,21 @@ struct LibraryView: View {
             let url = model.pdfURL(for: details)
         else { return }
         previewURL = url
+    }
+
+    /// Makes the toolbar's `.searchable` field first responder in the key window.
+    private func focusLibrarySearch() {
+        guard let window = NSApp.keyWindow, let toolbar = window.toolbar else { return }
+        for item in toolbar.items {
+            if let searchItem = item as? NSSearchToolbarItem {
+                window.makeFirstResponder(searchItem.searchField)
+                return
+            }
+            if let field = item.view as? NSSearchField {
+                window.makeFirstResponder(field)
+                return
+            }
+        }
     }
 
     private func openReader(_ id: Int64) {
