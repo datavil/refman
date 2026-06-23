@@ -676,6 +676,9 @@ private struct ToolbarConfigurator: NSViewRepresentable {
             // = false, so watch isCollapsed and force it back open.
             SidebarCollapseGuard.attach(to: item)
         }
+        // On a fresh install SwiftUI doesn't reliably honor the columns' `ideal`
+        // widths, so snap to the built-in defaults the first time.
+        LayoutReset.applyDefaultsIfFresh(split)
     }
 }
 
@@ -705,6 +708,25 @@ enum LayoutReset {
     static let sidebarWidth: CGFloat = 240
     static let inspectorWidth: CGFloat = 470
     static let windowSize = NSSize(width: 1280, height: 800)
+
+    /// Set once per launch, so we don't re-snap dividers the user has dragged
+    /// before SwiftUI persists their new geometry.
+    private static var appliedFreshDefaults = false
+
+    /// First-launch only: when SwiftUI has no saved split geometry yet, force the
+    /// default divider positions (its `ideal` column widths are applied
+    /// unreliably). Leaves the window size alone and never overrides a layout the
+    /// user has already saved.
+    static func applyDefaultsIfFresh(_ split: NSSplitView) {
+        guard !appliedFreshDefaults, split.subviews.count >= 3 else { return }
+        let hasSavedLayout = UserDefaults.standard.dictionaryRepresentation().keys
+            .contains { $0.hasPrefix("NSSplitView Subview Frames") }
+        guard !hasSavedLayout else { return }
+        appliedFreshDefaults = true
+        split.layoutSubtreeIfNeeded()
+        split.setPosition(sidebarWidth, ofDividerAt: 0)
+        split.setPosition(split.bounds.width - inspectorWidth, ofDividerAt: 1)
+    }
 
     static func run() {
         // Forget the autosaved geometry so the next launch also starts fresh.
