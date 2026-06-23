@@ -25,7 +25,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     }
 
     enum Install { case script(String), openURL(URL) }
-    enum SignIn { case browserCLI(String), terminal(String), none }
+    enum SignIn { case browserCLI(String), none }
 
     var install: Install {
         switch self {
@@ -35,13 +35,13 @@ enum LLMProvider: String, CaseIterable, Identifiable {
         }
     }
 
-    /// How sign-in is triggered. Codex has a clean browser-callback `login`;
-    /// Claude logs in on first run (Keychain), so we open it in Terminal.
+    /// How sign-in is triggered. Both Codex and Claude expose a browser-callback
+    /// `login` that completes on its own — no Terminal, no paste-back.
     var signIn: SignIn {
         switch self {
         case .ollama: return .none
         case .openai: return .browserCLI("codex login")
-        case .claude: return .terminal("claude")
+        case .claude: return .browserCLI("claude auth login --claudeai")
         }
     }
 
@@ -142,17 +142,17 @@ final class ProviderSetupModel: ObservableObject {
         switch p.signIn {
         case .browserCLI(let command):
             run(p, message: "Complete sign-in in your browser…", shell: command)
-        case .terminal(let command):
-            openInTerminal(command)
-            message = "Finish signing in to \(p.title) in Terminal, then Refresh."
         case .none:
             break
         }
     }
 
     func signOut(_ p: LLMProvider) {
-        guard p == .openai else { return }
-        run(p, message: "Signing out…", shell: "codex logout")
+        switch p {
+        case .openai: run(p, message: "Signing out…", shell: "codex logout")
+        case .claude: run(p, message: "Signing out…", shell: "claude auth logout")
+        case .ollama: break
+        }
     }
 
     // MARK: - Subprocess
@@ -184,18 +184,6 @@ final class ProviderSetupModel: ObservableObject {
         }
     }
 
-    private func openInTerminal(_ command: String) {
-        let script = """
-            tell application "Terminal"
-                activate
-                do script "\(command)"
-            end tell
-            """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        try? process.run()
-    }
 }
 
 /// Status + one-click Install / Sign In controls for one provider, shown inside
@@ -239,11 +227,6 @@ struct ProviderSetupView: View {
                         }
                         if status.signedIn == true {
                             Button("Sign Out") { setup.signOut(provider) }
-                        }
-                    case .terminal:
-                        // No headless sign-out; once signed in, just show the badge.
-                        if status.signedIn != true {
-                            Button("Sign In") { setup.signIn(provider) }
                         }
                     }
                 }
