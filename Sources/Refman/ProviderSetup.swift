@@ -237,12 +237,19 @@ struct ProviderSetupView: View {
             .disabled(busy)
             if let command = provider.installCommand {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(
-                        status.installed
-                            ? "Install command (to reinstall or update):"
-                            : "Install it — click Install above, or run in Terminal:"
-                    )
-                    .font(.caption).foregroundStyle(.secondary)
+                    if status.installed {
+                        Text("Install command (to reinstall or update):")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("The Install button above does this for you. To do it yourself:")
+                            .font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("1. Open the Terminal app (press ⌘-Space, type “Terminal”, hit Return).")
+                            Text("2. Copy the command below and paste it into the Terminal window.")
+                            Text("3. Press Return and wait for it to finish.")
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
+                    }
                     HStack(spacing: 8) {
                         Text(command)
                             .font(.system(.caption, design: .monospaced))
