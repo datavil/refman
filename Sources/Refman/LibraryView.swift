@@ -11,7 +11,6 @@ struct LibraryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
     @AppStorage(SettingsKeys.citationStyle) private var citationStyleRaw = Citeproc.Style.apa.rawValue
-    @AppStorage(SettingsKeys.accentColor) private var accentColorRaw = AppAccent.blue.rawValue
     @State private var newCollectionName = ""
     @State private var showingNewCollection = false
     @State private var collectionToDelete: RefmanCore.Collection?
@@ -428,9 +427,6 @@ struct LibraryView: View {
             }
         }
         .alternatingRowBackgrounds(.disabled)
-        .background(
-            DocumentTableHighlighter(
-                accent: (AppAccent(rawValue: accentColorRaw) ?? .blue).color))
         .contextMenu(forSelectionType: Int64.self) { ids in
             documentContextMenu(ids)
         } primaryAction: { ids in

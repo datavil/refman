@@ -24,24 +24,73 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
-/// The accent color used to tint controls and the selected-paper highlight.
+/// The app's accent color, applied through the macOS per-app `AppleAccentColor`
+/// override so the selected-paper highlight (and other accent controls) use it.
+/// macOS reads the accent at launch, so a change takes effect after relaunch.
 enum AppAccent: String, CaseIterable, Identifiable {
-    case blue, purple, pink, red, orange, yellow, green, teal, graphite
+    case system, graphite, red, orange, yellow, green, blue, purple, pink
 
     var id: String { rawValue }
 
+    var label: String {
+        switch self {
+        case .system: return "Default"
+        case .graphite: return "Graphite"
+        case .red: return "Red"
+        case .orange: return "Orange"
+        case .yellow: return "Yellow"
+        case .green: return "Green"
+        case .blue: return "Blue"
+        case .purple: return "Purple"
+        case .pink: return "Pink"
+        }
+    }
+
+    /// Swatch shown in the picker.
     var color: Color {
         switch self {
-        case .blue: return .blue
-        case .purple: return .purple
-        case .pink: return .pink
+        case .system: return Color(.controlAccentColor)
+        case .graphite: return Color(.systemGray)
         case .red: return .red
         case .orange: return .orange
         case .yellow: return .yellow
         case .green: return .green
-        case .teal: return .teal
-        case .graphite: return Color(.systemGray)
+        case .blue: return .blue
+        case .purple: return .purple
+        case .pink: return .pink
         }
+    }
+
+    /// The `AppleAccentColor` value macOS expects, or nil to inherit the system
+    /// accent (the override key is removed).
+    var appleAccentValue: Int? {
+        switch self {
+        case .system: return nil
+        case .graphite: return -1
+        case .red: return 0
+        case .orange: return 1
+        case .yellow: return 2
+        case .green: return 3
+        case .blue: return 4
+        case .purple: return 5
+        case .pink: return 6
+        }
+    }
+
+    /// Writes (or clears) the per-app accent override. Takes effect on next launch.
+    func applyToDefaults() {
+        let defaults = UserDefaults.standard
+        if let value = appleAccentValue {
+            defaults.set(value, forKey: "AppleAccentColor")
+        } else {
+            defaults.removeObject(forKey: "AppleAccentColor")
+        }
+    }
+
+    /// The accent currently chosen in Settings (defaults to following the system).
+    static var stored: AppAccent {
+        AppAccent(rawValue: UserDefaults.standard.string(forKey: SettingsKeys.accentColor) ?? "")
+            ?? .system
     }
 }
 
@@ -121,10 +170,11 @@ final class CodexModelList: ObservableObject {
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
-    @AppStorage(SettingsKeys.accentColor) private var accentColor = AppAccent.blue.rawValue
+    @AppStorage(SettingsKeys.accentColor) private var accentColor = AppAccent.system.rawValue
     @AppStorage(SettingsKeys.contactEmail) private var contactEmail = ""
 
     @FocusState private var emailFocused: Bool
+    @State private var accentNeedsRelaunch = false
 
     var body: some View {
         Form {
@@ -138,6 +188,19 @@ struct SettingsView: View {
                 LabeledContent("Accent") {
                     AccentColorPicker(selection: $accentColor)
                 }
+                if accentNeedsRelaunch {
+                    HStack {
+                        Text("Relaunch Refman to apply the accent.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Relaunch", action: relaunch)
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .onChange(of: accentColor) { _, newValue in
+                (AppAccent(rawValue: newValue) ?? .system).applyToDefaults()
+                accentNeedsRelaunch = true
             }
 
             LibrarySettingsSection()
@@ -170,9 +233,30 @@ struct SettingsView: View {
                 .hidden()
         }
     }
+
+    /// Quit and reopen the app so macOS re-reads the accent at startup.
+    private func relaunch() {
+        let bundleURL = Bundle.main.bundleURL
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let script = """
+            #!/bin/bash
+            while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
+            /usr/bin/open "\(bundleURL.path)"
+            """
+        let scriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("refman-relaunch-\(UUID().uuidString).sh")
+        guard (try? script.write(to: scriptURL, atomically: true, encoding: .utf8)) != nil else {
+            return
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = [scriptURL.path]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
 }
 
-/// A row of preset accent swatches; the selected one shows a ring.
+/// A row of accent swatches; the selected one shows a ring.
 struct AccentColorPicker: View {
     @Binding var selection: String
 
@@ -190,7 +274,7 @@ struct AccentColorPicker: View {
                     }
                     .contentShape(Circle())
                     .onTapGesture { selection = accent.rawValue }
-                    .help(accent.rawValue.capitalized)
+                    .help(accent.label)
             }
         }
     }

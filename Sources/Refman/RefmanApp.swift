@@ -22,6 +22,9 @@ struct RefmanApp: App {
         if UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) == "gemini" {
             UserDefaults.standard.set("ollama", forKey: SettingsKeys.llmProvider)
         }
+        // Keep the per-app accent override in sync with the chosen accent so macOS
+        // applies it at startup.
+        AppAccent.stored.applyToDefaults()
         // Running from `swift run` (no app bundle): become a regular app with a window.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
