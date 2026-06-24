@@ -4,31 +4,62 @@ import SwiftUI
 /// Recolors the selected-row highlight of the documents table to a user-chosen
 /// accent — and nothing else. SwiftUI's `Table` draws its selection with the
 /// system accent and ignores `.tint`. We let the row draw its real (rounded,
-/// inset) selection but feed it our accent: while that one draw call runs, the
-/// selection-color getters it reads return our accent. Scoped to the table we tag.
+/// inset) selection but feed it our accent: only while our tagged table's
+/// selected row runs `drawSelection(in:)`, the selection colors it reads return
+/// the accent.
 ///
-/// Observed on macOS 26: the active (emphasized) selection reads the class color
+/// The active (emphasized) selection reads the class color
 /// `alternateSelectedControlColor`; the inactive one reads the row's instance
-/// `secondarySelectedControlColor`. We override the wider set below so the recolor
-/// survives either path across OS versions.
+/// `secondarySelectedControlColor`. The class colors are dynamic system colors
+/// that re-enter themselves through their own selector while recaching, so a
+/// *permanent* swizzle of them recurses infinitely (crash). We therefore swap
+/// their implementation in only for the duration of our draw call and restore it
+/// immediately after — during that window we return a flat color, so there is no
+/// recache and no recursion.
 enum DocumentTableHighlight {
     static let tableIdentifier = NSUserInterfaceItemIdentifier("refmanDocumentTable")
     static var accent: NSColor = .controlAccentColor
 
-    /// Set only while our selected row's `drawSelection(in:)` runs (main thread).
+    /// True only while our selected row's `drawSelection(in:)` runs (main thread).
     static var overrideActive = false
 
     private static var swizzledRowClasses = Set<ObjectIdentifier>()
-    private static var colorSwizzled = false
+
+    /// Class color getters the emphasized selection may read, with their real and
+    /// accent-returning implementations, so we can swap back and forth cheaply.
+    private struct ColorHook {
+        let method: Method
+        let original: IMP
+        let accent: IMP
+    }
+    private static let colorHooks: [ColorHook] = {
+        let accentBlock: @convention(block) (AnyObject) -> NSColor = { _ in accent }
+        let accentIMP = imp_implementationWithBlock(accentBlock)
+        return [
+            "alternateSelectedControlColor", "selectedContentBackgroundColor", "controlAccentColor",
+        ].compactMap { name in
+            guard let m = class_getClassMethod(NSColor.self, NSSelectorFromString(name)) else {
+                return nil
+            }
+            return ColorHook(method: m, original: method_getImplementation(m), accent: accentIMP)
+        }
+    }()
+
+    private static func beginAccentColors() {
+        for hook in colorHooks { method_setImplementation(hook.method, hook.accent) }
+    }
+    private static func endAccentColors() {
+        for hook in colorHooks { method_setImplementation(hook.method, hook.original) }
+    }
 
     static func swizzleRowViewClass(_ cls: AnyClass) {
-        installClassColorSwizzleOnce()
+        _ = colorHooks  // build the hook table before first use
 
         let key = ObjectIdentifier(cls)
         guard !swizzledRowClasses.contains(key) else { return }
         swizzledRowClasses.insert(key)
 
-        // Wrap drawSelection(in:) to mark our selected row's draw window.
+        // drawSelection(in:): swap accent colors in just for our selected row.
         let drawSel = #selector(NSTableRowView.drawSelection(in:))
         if let method = class_getInstanceMethod(cls, drawSel) {
             let original = method_getImplementation(method)
@@ -37,62 +68,35 @@ enum DocumentTableHighlight {
                 let ours =
                     rowView.isSelected
                     && (rowView.superview as? NSTableView)?.identifier == tableIdentifier
-                if ours { overrideActive = true }
+                if ours {
+                    overrideActive = true
+                    beginAccentColors()
+                }
+                defer {
+                    if ours {
+                        endAccentColors()
+                        overrideActive = false
+                    }
+                }
                 unsafeBitCast(original, to: DrawFn.self)(rowView, drawSel, rect)
-                overrideActive = false
             }
             class_replaceMethod(
                 cls, drawSel, imp_implementationWithBlock(block), method_getTypeEncoding(method))
         }
 
-        // Inactive-window selection reads this instance color (SwiftUI overrides it).
+        // Inactive-window selection reads this instance color (SwiftUI overrides
+        // it). It's a plain row method — safe to leave swizzled permanently.
         let secSel = NSSelectorFromString("secondarySelectedControlColor")
         if let method = class_getInstanceMethod(cls, secSel) {
             let original = method_getImplementation(method)
             typealias ColorFn = @convention(c) (NSTableRowView, Selector) -> NSColor
             let block: @convention(block) (NSTableRowView) -> NSColor = { rowView in
-                overrideActive ? accent : unsafeBitCast(original, to: ColorFn.self)(rowView, secSel)
+                overrideActive
+                    ? accent : unsafeBitCast(original, to: ColorFn.self)(rowView, secSel)
             }
             class_replaceMethod(
                 cls, secSel, imp_implementationWithBlock(block), method_getTypeEncoding(method))
         }
-    }
-
-    /// Active-window selection reads one of these class colors; return our accent
-    /// for all of them while `overrideActive` is set. The getter selectors are
-    /// built by name to avoid referencing deprecated symbols at compile time.
-    private static func installClassColorSwizzleOnce() {
-        guard !colorSwizzled else { return }
-        colorSwizzled = true
-        let pairs: [(String, Selector)] = [
-            ("alternateSelectedControlColor", #selector(NSColor.refman_alternateSelectedControlColor)),
-            ("selectedContentBackgroundColor", #selector(NSColor.refman_selectedContentBackgroundColor)),
-            ("controlAccentColor", #selector(NSColor.refman_controlAccentColor)),
-        ]
-        for (name, repl) in pairs {
-            guard let a = class_getClassMethod(NSColor.self, NSSelectorFromString(name)),
-                let b = class_getClassMethod(NSColor.self, repl)
-            else { continue }
-            method_exchangeImplementations(a, b)
-        }
-    }
-}
-
-extension NSColor {
-    // After exchange, each `refman_*` selector points at the original getter. These
-    // must be `dynamic` so the self-call dispatches through objc (hitting the
-    // swapped original) instead of recursing into this same Swift method.
-    @objc dynamic class func refman_alternateSelectedControlColor() -> NSColor {
-        DocumentTableHighlight.overrideActive
-            ? DocumentTableHighlight.accent : refman_alternateSelectedControlColor()
-    }
-    @objc dynamic class func refman_selectedContentBackgroundColor() -> NSColor {
-        DocumentTableHighlight.overrideActive
-            ? DocumentTableHighlight.accent : refman_selectedContentBackgroundColor()
-    }
-    @objc dynamic class func refman_controlAccentColor() -> NSColor {
-        DocumentTableHighlight.overrideActive
-            ? DocumentTableHighlight.accent : refman_controlAccentColor()
     }
 }
 
