@@ -92,5 +92,12 @@ struct RefmanApp: App {
                 .environmentObject(model)
                 .preferredColorScheme(colorScheme)
         }
+
+        Window("AI Settings", id: "ai-settings") {
+            AISettingsView()
+                .environmentObject(model)
+                .preferredColorScheme(colorScheme)
+        }
+        .windowResizability(.contentSize)
     }
 }

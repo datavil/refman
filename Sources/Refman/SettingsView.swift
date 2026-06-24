@@ -24,6 +24,27 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
+/// The accent color used to tint controls and the selected-paper highlight.
+enum AppAccent: String, CaseIterable, Identifiable {
+    case blue, purple, pink, red, orange, yellow, green, teal, graphite
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .blue: return .blue
+        case .purple: return .purple
+        case .pink: return .pink
+        case .red: return .red
+        case .orange: return .orange
+        case .yellow: return .yellow
+        case .green: return .green
+        case .teal: return .teal
+        case .graphite: return Color(.systemGray)
+        }
+    }
+}
+
 enum SettingsKeys {
     static let appearance = "appearance"
     static let agentPath = "agentPath"
@@ -31,6 +52,7 @@ enum SettingsKeys {
     static let ollamaModel = "ollamaModel"
     static let claudeModel = "claudeModel"
     static let openaiModel = "openaiModel"
+    static let accentColor = "accentColor"
     static let highlightPalette = "highlightPalette"
     static let highlightOpacity = "highlightOpacity"
     static let citationStyle = "citationStyle"
@@ -99,16 +121,9 @@ final class CodexModelList: ObservableObject {
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
-    @AppStorage(SettingsKeys.agentPath) private var agentPath = ""
-    @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
-    @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
-    @AppStorage(SettingsKeys.claudeModel) private var claudeModel = ""
-    @AppStorage(SettingsKeys.openaiModel) private var openaiModel = ""
+    @AppStorage(SettingsKeys.accentColor) private var accentColor = AppAccent.blue.rawValue
     @AppStorage(SettingsKeys.contactEmail) private var contactEmail = ""
 
-    @StateObject private var modelList = OllamaModelList()
-    @StateObject private var codexList = CodexModelList()
-    @StateObject private var providerSetup = ProviderSetupModel()
     @FocusState private var emailFocused: Bool
 
     var body: some View {
@@ -120,6 +135,9 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                LabeledContent("Accent") {
+                    AccentColorPicker(selection: $accentColor)
+                }
             }
 
             LibrarySettingsSection()
@@ -140,115 +158,40 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-
-            Section("Assistant Agent") {
-                LabeledContent("Agent") {
-                    AgentPicker(
-                        stackAlignment: .trailing,
-                        pathAlignment: .trailing,
-                        pathMaxWidth: 280)
-                }
-                Text(
-                    "Any executable speaking the Agent Client Protocol on stdio works here. "
-                        + "The bundled refman-agent bridges to a local Ollama."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
-            // Provider and model choice only apply to the bundled agent.
-            if agentPath.isEmpty {
-                Section("Model Provider") {
-                    AssistantProviderPicker(selection: $llmProvider)
-                }
-
-                if llmProvider == "claude" {
-                    Section("Claude") {
-                        ProviderSetupView(provider: .claude, setup: providerSetup)
-                        Picker("Model", selection: $claudeModel) {
-                            Text("Default").tag("")
-                            Text("Sonnet").tag("sonnet")
-                            Text("Opus").tag("opus")
-                            Text("Haiku").tag("haiku")
-                        }
-                        Text(
-                            "Uses the Claude Code CLI signed in with your Claude "
-                                + "subscription — no API key, no per-token billing."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                } else if llmProvider == "openai" {
-                    Section("OpenAI (Codex)") {
-                        ProviderSetupView(provider: .openai, setup: providerSetup)
-                        if codexList.models.isEmpty {
-                            TextField(
-                                "Model", text: $openaiModel,
-                                prompt: Text("Codex default"))
-                        } else {
-                            Picker("Model", selection: $openaiModel) {
-                                Text("Default (Codex config)").tag("")
-                                ForEach(codexList.models, id: \.slug) { model in
-                                    Text(model.name).tag(model.slug)
-                                }
-                            }
-                        }
-                        Text(
-                            "Uses the Codex CLI signed in with your ChatGPT subscription "
-                                + "— no API key, no per-token billing."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Section("Ollama") {
-                        ProviderSetupView(provider: .ollama, setup: providerSetup)
-                    }
-                    Section("Ollama Model") {
-                        if modelList.models.isEmpty {
-                            TextField(
-                                "Model", text: $ollamaModel,
-                                prompt: Text("largest installed (auto)"))
-                            if modelList.loadFailed {
-                                Label(
-                                    "Can't reach Ollama — start it above, then Refresh.",
-                                    systemImage: "exclamationmark.triangle.fill"
-                                )
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                            }
-                        } else {
-                            Picker("Model", selection: $ollamaModel) {
-                                Text("Largest installed (auto)").tag("")
-                                ForEach(modelList.models, id: \.self) { name in
-                                    Text(name).tag(name)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section {
-                Text("Agent executable changes apply to newly opened assistant panels.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
         .contentShape(Rectangle())
         .onTapGesture { emailFocused = false }
         .frame(width: 480, height: 600)
-        .onAppear {
-            modelList.load()
-            codexList.load()
-            providerSetup.refresh()
-        }
         .background {
             // Esc closes the Settings window.
             Button("") { NSApp.keyWindow?.close() }
                 .keyboardShortcut(.cancelAction)
                 .hidden()
+        }
+    }
+}
+
+/// A row of preset accent swatches; the selected one shows a ring.
+struct AccentColorPicker: View {
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(AppAccent.allCases) { accent in
+                Circle()
+                    .fill(accent.color)
+                    .frame(width: 18, height: 18)
+                    .overlay {
+                        Circle()
+                            .strokeBorder(.primary, lineWidth: 2)
+                            .padding(-3)
+                            .opacity(selection == accent.rawValue ? 1 : 0)
+                    }
+                    .contentShape(Circle())
+                    .onTapGesture { selection = accent.rawValue }
+                    .help(accent.rawValue.capitalized)
+            }
         }
     }
 }

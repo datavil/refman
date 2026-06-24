@@ -11,6 +11,7 @@ struct LibraryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
     @AppStorage(SettingsKeys.citationStyle) private var citationStyleRaw = Citeproc.Style.apa.rawValue
+    @AppStorage(SettingsKeys.accentColor) private var accentColorRaw = AppAccent.blue.rawValue
     @State private var newCollectionName = ""
     @State private var showingNewCollection = false
     @State private var collectionToDelete: RefmanCore.Collection?
@@ -297,7 +298,10 @@ struct LibraryView: View {
             .padding(.vertical, 8)
         }
         .safeAreaInset(edge: .bottom, alignment: .leading) {
-            SidebarFooter(updater: model.updater) { openSettings() }
+            SidebarFooter(
+                updater: model.updater,
+                openSettings: { openSettings() },
+                openAISettings: { openWindow(id: "ai-settings") })
         }
     }
 
@@ -424,6 +428,9 @@ struct LibraryView: View {
             }
         }
         .alternatingRowBackgrounds(.disabled)
+        .background(
+            DocumentTableHighlighter(
+                accent: (AppAccent(rawValue: accentColorRaw) ?? .blue).color))
         .contextMenu(forSelectionType: Int64.self) { ids in
             documentContextMenu(ids)
         } primaryAction: { ids in
@@ -766,6 +773,7 @@ extension NSView {
 private struct SidebarFooter: View {
     @ObservedObject var updater: Updater
     let openSettings: () -> Void
+    let openAISettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -780,6 +788,14 @@ private struct SidebarFooter: View {
                 .controlSize(.small)
                 .help("Install Refman \(version) and relaunch")
             }
+            Button {
+                openAISettings()
+            } label: {
+                Label("AI Settings", systemImage: "sparkles")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Assistant agent and model settings")
             Button {
                 openSettings()
             } label: {
