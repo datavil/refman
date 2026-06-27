@@ -262,7 +262,7 @@ struct AccentColorPicker: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(AppAccent.allCases) { accent in
+            ForEach(AppAccent.allCases.filter { $0 != .system }) { accent in
                 Circle()
                     .fill(accent.color)
                     .frame(width: 18, height: 18)
