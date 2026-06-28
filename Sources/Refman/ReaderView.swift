@@ -19,6 +19,7 @@ struct ReaderView: View {
     private var highlightOpacity = 1.0
     @State private var showTooltipConfig = false
     @State private var showSearch = false
+    @State private var bubbleHeight: CGFloat = 0
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -38,7 +39,15 @@ struct ReaderView: View {
                     let rect = reader.clickedAnnotationRect
                 {
                     AnnotationBubble(reader: reader, annotation: clicked)
-                        .position(x: max(rect.midX, 60), y: max(rect.minY - 22, 16))
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                            bubbleHeight = $0
+                        }
+                        // Anchor the bubble's bottom just above the highlight; when
+                        // there isn't room above, flip it below so a note-expanded
+                        // bubble never covers the highlighted text. Hidden until the
+                        // first measurement so it never flashes in the wrong spot.
+                        .position(x: max(rect.midX, 60), y: bubbleY(for: rect))
+                        .opacity(bubbleHeight > 0 ? 1 : 0)
                         .transition(.opacity)
                 }
             }
@@ -237,6 +246,16 @@ struct ReaderView: View {
         withAnimation(.easeOut(duration: 0.15)) { showSearch = false }
         reader.searchText = ""
         reader.runSearch()
+    }
+
+    /// Vertical center for the annotation bubble: sits just above the highlight,
+    /// flipping below when there isn't room above it.
+    private func bubbleY(for rect: CGRect) -> CGFloat {
+        let gap: CGFloat = 6
+        let half = bubbleHeight / 2
+        let above = rect.minY - gap - half
+        if above - half >= 8 { return above }
+        return rect.maxY + gap + half
     }
 
     private var paletteHexes: [String] {
@@ -854,6 +873,7 @@ final class ReaderModel: ObservableObject {
             savePDF()
         }
         annotations = (try? model.repository.annotations(documentId: documentId)) ?? annotations
+        if clickedAnnotation?.uuid == annotation.uuid { clickedAnnotation = updated }
     }
 
     /// Changes an existing markup's color in the page and the database.
@@ -1278,12 +1298,15 @@ struct SelectionPen: View {
 }
 
 /// Floating action shown when the user clicks an existing highlight/underline:
-/// recolor swatches and remove.
+/// recolor swatches, note, and remove.
 struct AnnotationBubble: View {
     @ObservedObject var reader: ReaderModel
     let annotation: RefmanCore.Annotation
     @AppStorage(SettingsKeys.highlightPalette)
     private var highlightPalette = AnnotationOptions.defaultPalette
+    @State private var showNoteEditor = false
+    @State private var noteDraft = ""
+    @FocusState private var noteFocused: Bool
 
     private var paletteColors: [(name: String, color: NSColor)] {
         highlightPalette.split(separator: ",").compactMap { hex in
@@ -1294,37 +1317,66 @@ struct AnnotationBubble: View {
         }
     }
 
+    private var note: String { annotation.noteText ?? "" }
+    private var hasNote: Bool { !note.isEmpty }
+
     var body: some View {
-        HStack(spacing: 10) {
-            ForEach(paletteColors, id: \.name) { entry in
-                Button {
-                    reader.recolor(annotation, to: entry.color)
-                } label: {
-                    Circle()
-                        .fill(Color(nsColor: entry.color))
-                        .frame(width: 13, height: 13)
-                        .overlay {
-                            if annotation.colorHex == entry.color.hexString {
-                                Circle().strokeBorder(.primary, lineWidth: 1.5)
+        VStack(alignment: .leading, spacing: 7) {
+            // Left-clicking a highlight reveals its note here, like a tooltip.
+            if hasNote {
+                Text(note)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 240, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 10) {
+                ForEach(paletteColors, id: \.name) { entry in
+                    Button {
+                        reader.recolor(annotation, to: entry.color)
+                    } label: {
+                        Circle()
+                            .fill(Color(nsColor: entry.color))
+                            .frame(width: 13, height: 13)
+                            .overlay {
+                                if annotation.colorHex == entry.color.hexString {
+                                    Circle().strokeBorder(.primary, lineWidth: 1.5)
+                                }
                             }
-                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Recolor: \(entry.name)")
+                }
+
+                separator
+
+                Button {
+                    noteDraft = note
+                    showNoteEditor = true
+                } label: {
+                    Image(systemName: hasNote ? "note.text" : "note.text.badge.plus")
+                        .font(.system(size: 12, weight: .medium))
                 }
                 .buttonStyle(.plain)
-                .help("Recolor: \(entry.name)")
-            }
+                .foregroundStyle(hasNote ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                .help(hasNote ? "Edit note" : "Add note")
+                .popover(isPresented: $showNoteEditor, arrowEdge: .bottom) {
+                    noteEditor
+                }
 
-            Rectangle().fill(.quaternary).frame(width: 1, height: 18)
+                separator
 
-            Button {
-                reader.clearClickedAnnotation()
-                reader.delete(annotation)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12, weight: .medium))
+                Button {
+                    reader.clearClickedAnnotation()
+                    reader.delete(annotation)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Remove this annotation")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Remove this annotation")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
@@ -1332,6 +1384,44 @@ struct AnnotationBubble: View {
             Color(nsColor: .controlBackgroundColor),
             in: RoundedRectangle(cornerRadius: 10))
         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+
+    private var noteEditor: some View {
+        VStack(spacing: 8) {
+            TextEditor(text: $noteDraft)
+                .font(.callout)
+                .focused($noteFocused)
+                .scrollContentBackground(.hidden)
+                .frame(width: 240, height: 110)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+            HStack {
+                if hasNote {
+                    Button("Remove", role: .destructive) {
+                        reader.setNote("", for: annotation)
+                        showNoteEditor = false
+                    }
+                }
+                Spacer()
+                Button("Save") {
+                    reader.setNote(noteDraft, for: annotation)
+                    showNoteEditor = false
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(12)
+        .task {
+            // The popover window isn't key yet on appear, so an immediate focus
+            // is dropped; wait a beat for it to settle before grabbing the caret.
+            try? await Task.sleep(for: .milliseconds(120))
+            noteFocused = true
+        }
+    }
+
+    private var separator: some View {
+        Rectangle().fill(.quaternary).frame(width: 1, height: 18)
     }
 }
 
