@@ -1352,6 +1352,9 @@ struct AnnotationBubble: View {
             Color(nsColor: .controlBackgroundColor),
             in: RoundedRectangle(cornerRadius: 10))
         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+        // Hug the content so the toolbar row ends at the trash icon instead of
+        // the note's max width stretching the bubble past it.
+        .fixedSize()
     }
 
     private var bubbleContent: some View {
