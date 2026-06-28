@@ -80,9 +80,43 @@ public enum LibraryLocation {
         }
     }
 
+    /// Forces iCloud to download every evicted (dataless) file under `root` and
+    /// waits until they're materialized. Moving a dataless placeholder out of the
+    /// iCloud container loses its data — its bytes only exist in the cloud — so
+    /// this must run before relocating a library off iCloud. Best-effort with a
+    /// timeout; a no-op for files that aren't in iCloud.
+    public static func materialize(at root: URL) async throws {
+        let fm = FileManager.default
+        let keys: Set<URLResourceKey> = [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]
+
+        func pendingDownloads() -> [URL] {
+            guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: Array(keys))
+            else { return [] }
+            var result: [URL] = []
+            for case let url as URL in enumerator {
+                guard let values = try? url.resourceValues(forKeys: keys),
+                    values.isUbiquitousItem == true,
+                    values.ubiquitousItemDownloadingStatus != .current
+                else { continue }
+                result.append(url)
+            }
+            return result
+        }
+
+        let deadline = Date().addingTimeInterval(300)
+        var pending = pendingDownloads()
+        while !pending.isEmpty {
+            for url in pending { try? fm.startDownloadingUbiquitousItem(at: url) }
+            guard Date() < deadline else { throw LibraryLocationError.downloadTimedOut }
+            try await Task.sleep(for: .milliseconds(500))
+            pending = pendingDownloads()
+        }
+    }
+
     /// Moves an existing library (database + storage) from one root to another,
-    /// creating the destination and replacing any items already there.
-    /// Items that don't exist at the source are skipped.
+    /// creating the destination and replacing any items already there. Copies
+    /// then deletes the source so a partial failure can't lose data. Items that
+    /// don't exist at the source are skipped.
     public static func relocate(from: URL, to: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: to, withIntermediateDirectories: true)
@@ -91,7 +125,19 @@ public enum LibraryLocation {
             let dst = to.appendingPathComponent(name)
             guard fm.fileExists(atPath: src.path) else { continue }
             if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
-            try fm.moveItem(at: src, to: dst)
+            try fm.copyItem(at: src, to: dst)
+            try fm.removeItem(at: src)
+        }
+    }
+}
+
+public enum LibraryLocationError: LocalizedError {
+    case downloadTimedOut
+
+    public var errorDescription: String? {
+        switch self {
+        case .downloadTimedOut:
+            "Timed out downloading the library from iCloud. Check your connection and try again."
         }
     }
 }

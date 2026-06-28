@@ -176,6 +176,11 @@ struct SettingsView: View {
     @FocusState private var emailFocused: Bool
     @State private var accentNeedsRelaunch = false
 
+    private var isEmailValid: Bool {
+        let pattern = #/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/#.ignoresCase()
+        return contactEmail.wholeMatch(of: pattern) != nil
+    }
+
     var body: some View {
         Form {
             Section("Appearance") {
@@ -193,7 +198,7 @@ struct SettingsView: View {
                         Text("Relaunch Refman to apply the accent.")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Relaunch", action: relaunch)
+                        Button("Relaunch") { model.relaunch() }
                             .controlSize(.small)
                     }
                 }
@@ -214,6 +219,11 @@ struct SettingsView: View {
                     "Contact email", text: $contactEmail,
                     prompt: Text("you@example.com"))
                     .focused($emailFocused)
+                if !contactEmail.isEmpty && !isEmailValid {
+                    Text("Enter a valid email address.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
                 Text(
                     "Used to fetch open-access PDFs (Unpaywall) and for polite API "
                         + "access to CrossRef. Required for DOI PDF downloads."
@@ -224,6 +234,12 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .contentShape(Rectangle())
+        .onAppear {
+            Task {
+                try? await Task.sleep(for: .milliseconds(50))
+                emailFocused = false
+            }
+        }
         .onTapGesture { emailFocused = false }
         .frame(width: 480, height: 600)
         .background {
@@ -234,26 +250,6 @@ struct SettingsView: View {
         }
     }
 
-    /// Quit and reopen the app so macOS re-reads the accent at startup.
-    private func relaunch() {
-        let bundleURL = Bundle.main.bundleURL
-        let pid = ProcessInfo.processInfo.processIdentifier
-        let script = """
-            #!/bin/bash
-            while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
-            /usr/bin/open "\(bundleURL.path)"
-            """
-        let scriptURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("refman-relaunch-\(UUID().uuidString).sh")
-        guard (try? script.write(to: scriptURL, atomically: true, encoding: .utf8)) != nil else {
-            return
-        }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = [scriptURL.path]
-        try? task.run()
-        NSApp.terminate(nil)
-    }
 }
 
 /// A row of accent swatches; the selected one shows a ring.
@@ -391,6 +387,21 @@ struct UpdatesSettingsSection: View {
     }
 }
 
+/// Borderless icon button that reveals a URL in Finder.
+struct RevealInFinderButton: View {
+    let url: URL
+    let tooltip: String
+
+    var body: some View {
+        Button("Reveal in Finder", systemImage: "arrow.up.forward.app") {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .help(tooltip)
+    }
+}
+
 /// Library location and iCloud Drive sync.
 struct ICloudSettingsSection: View {
     @EnvironmentObject var model: AppModel
@@ -400,12 +411,21 @@ struct ICloudSettingsSection: View {
 
     var body: some View {
         Section("iCloud Sync") {
-            LabeledContent("Location", value: model.libraryLocationDisplay)
             if model.isInICloudDrive {
-                Label("Syncing via iCloud Drive", systemImage: "checkmark.icloud")
-                    .foregroundStyle(.green)
+                HStack {
+                    Label("Syncing via iCloud Drive", systemImage: "checkmark.icloud")
+                        .foregroundStyle(.green)
+                    Spacer()
+                    RevealInFinderButton(url: model.libraryRootURL, tooltip: model.libraryLocationDisplay)
+                }
                 Button("Move Back to This Mac…") { confirmMove = .local }
             } else {
+                HStack {
+                    Label("Stored on this Mac", systemImage: "internaldrive")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    RevealInFinderButton(url: model.libraryRootURL, tooltip: model.libraryLocationDisplay)
+                }
                 Button("Move to iCloud Drive…") { confirmMove = .iCloud }
                     .disabled(!model.iCloudDriveAvailable)
                 if !model.iCloudDriveAvailable {
@@ -424,10 +444,10 @@ struct ICloudSettingsSection: View {
             isPresented: Binding(
                 get: { confirmMove != nil }, set: { if !$0 { confirmMove = nil } })
         ) {
-            Button("Move", role: .destructive) {
+            Button("Move & Restart", role: .destructive) {
                 switch confirmMove {
-                case .iCloud: model.moveLibraryToICloudDrive()
-                case .local: model.moveLibraryToLocal()
+                case .iCloud: Task { await model.moveLibraryToICloudDrive() }
+                case .local: Task { await model.moveLibraryToLocal() }
                 case nil: break
                 }
                 confirmMove = nil
@@ -435,8 +455,8 @@ struct ICloudSettingsSection: View {
             Button("Cancel", role: .cancel) { confirmMove = nil }
         } message: {
             Text(
-                "Your library (database and PDFs) will be moved. Quit and reopen "
-                    + "Refman afterward to use the new location.")
+                "Your library (database and PDFs) will be moved, then Refman will "
+                    + "restart to use the new location.")
         }
     }
 }

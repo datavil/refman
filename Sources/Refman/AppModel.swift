@@ -814,40 +814,70 @@ final class AppModel: ObservableObject {
             of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
     }
 
-    func moveLibraryToICloudDrive() {
+    func moveLibraryToICloudDrive() async {
         guard let target = LibraryLocation.iCloudDriveRoot() else {
             statusMessage = "iCloud Drive isn't enabled on this Mac."
             return
         }
-        moveLibrary(to: target)
+        await moveLibrary(to: target)
     }
 
-    func moveLibraryToLocal() {
+    func moveLibraryToLocal() async {
         guard let target = try? LibraryLocation.defaultRoot() else { return }
-        moveLibrary(to: target)
+        await moveLibrary(to: target)
     }
 
-    /// Points the library at `newRoot`, then asks the user to relaunch (the open
-    /// database connection isn't reopened in place). If a library already exists
-    /// at the destination (e.g. synced from another Mac) it's adopted in place
-    /// rather than overwritten.
-    private func moveLibrary(to newRoot: URL) {
+    /// Points the library at `newRoot`, then relaunches so the move takes effect
+    /// (the open database connection isn't reopened in place). If a library
+    /// already exists at the destination (e.g. synced from another Mac) it's
+    /// adopted in place rather than overwritten.
+    private func moveLibrary(to newRoot: URL) async {
         let current = libraryRootURL
         guard current.standardizedFileURL != newRoot.standardizedFileURL else { return }
+        // Adopt an existing library in place only when joining an iCloud library
+        // already synced from another Mac. A move to local always relocates so a
+        // stale leftover (e.g. from an earlier failed move) can't shadow the real
+        // library.
         let destHasLibrary = FileManager.default.fileExists(
             atPath: LibraryLocation.databaseURL(root: newRoot).path)
+        let adopt = destHasLibrary && LibraryLocation.isICloud(newRoot)
         do {
-            if !destHasLibrary {
+            if !adopt {
+                // Download evicted iCloud files before moving them out of the
+                // container; dataless placeholders would otherwise move as empty.
+                if LibraryLocation.isICloud(current) {
+                    statusMessage = "Downloading library from iCloud…"
+                    try await LibraryLocation.materialize(at: current)
+                }
                 try LibraryLocation.relocate(from: current, to: newRoot)
             }
             try? LibraryLocation.setHidden(true, at: newRoot)
             UserDefaults.standard.set(newRoot.path, forKey: SettingsKeys.libraryRootPath)
-            statusMessage = destHasLibrary
-                ? "Found an existing library here — quit and reopen Refman to use it."
-                : "Library moved — quit and reopen Refman to use the new location."
+            relaunch()
         } catch {
             statusMessage = "Move failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Quits and reopens the app so it reloads from the current library location.
+    func relaunch() {
+        let bundleURL = Bundle.main.bundleURL
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let script = """
+            #!/bin/bash
+            while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
+            /usr/bin/open "\(bundleURL.path)"
+            """
+        let scriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("refman-relaunch-\(UUID().uuidString).sh")
+        guard (try? script.write(to: scriptURL, atomically: true, encoding: .utf8)) != nil else {
+            return
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = [scriptURL.path]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 
     // MARK: - Files
