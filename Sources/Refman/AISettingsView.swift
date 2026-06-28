@@ -15,23 +15,10 @@ struct AISettingsView: View {
     @StateObject private var codexList = CodexModelList()
     @StateObject private var providerSetup = ProviderSetupModel()
 
+    @State private var showAdvanced = false
+
     var body: some View {
         Form {
-            Section("Assistant Agent") {
-                LabeledContent("Agent") {
-                    AgentPicker(
-                        stackAlignment: .trailing,
-                        pathAlignment: .trailing,
-                        pathMaxWidth: 280)
-                }
-                Text(
-                    "Any executable speaking the Agent Client Protocol on stdio works here. "
-                        + "The bundled refman-agent bridges to a local Ollama."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-
             // Provider and model choice only apply to the bundled agent.
             if agentPath.isEmpty {
                 Section("Model Provider") {
@@ -106,14 +93,36 @@ struct AISettingsView: View {
             }
 
             Section {
-                Text("Agent executable changes apply to newly opened assistant panels.")
+                Toggle("Use a custom agent", isOn: $showAdvanced)
+            }
+
+            if showAdvanced {
+                Section("Assistant Agent") {
+                    LabeledContent("Agent") {
+                        AgentPicker(
+                            stackAlignment: .trailing,
+                            pathAlignment: .trailing,
+                            pathMaxWidth: 280)
+                    }
+                    Text(
+                        "Any executable speaking the Agent Client Protocol on stdio works here. "
+                            + "The bundled refman-agent bridges to a local Ollama."
+                    )
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Text("Agent executable changes apply to newly opened assistant panels.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
         .frame(width: 480, height: 600)
         .onAppear {
+            if !agentPath.isEmpty { showAdvanced = true }
             modelList.load()
             codexList.load()
             providerSetup.refresh()

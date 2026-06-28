@@ -634,6 +634,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func renameCollection(id: Int64, to name: String) {
+        do {
+            try repository.renameCollection(id: id, to: name)
+            reload()
+        } catch {
+            statusMessage = "Could not rename collection: \(error.localizedDescription)"
+        }
+    }
+
     /// Reorders the siblings under `parentId` after a drag in the sidebar.
     func moveCollections(parentId: Int64?, from source: IndexSet, to destination: Int) {
         var siblings = collections.filter { $0.parentId == parentId }

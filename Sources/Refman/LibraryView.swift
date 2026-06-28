@@ -16,6 +16,8 @@ struct LibraryView: View {
     @State private var collectionToDelete: RefmanCore.Collection?
     @State private var subcollectionParent: RefmanCore.Collection?
     @State private var subcollectionName = ""
+    @State private var renamingCollectionId: Int64?
+    @State private var renameText = ""
     @State private var previewURL: URL?
     @State private var showingAddPopover = false
     @State private var identifierText = ""
@@ -215,16 +217,18 @@ struct LibraryView: View {
                     .tag(SidebarItem.trash)
             }
             Section("Reading") {
-                Label("Recently Opened", systemImage: "clock.arrow.circlepath")
-                    .tag(SidebarItem.recentlyOpened)
                 Label("Currently Reading", systemImage: "book")
                     .tag(SidebarItem.reading)
+                Label("Recently Opened", systemImage: "clock.arrow.circlepath")
+                    .tag(SidebarItem.recentlyOpened)
             }
             Section("Collections") {
                 CollectionTree(
                     parentId: nil,
                     collectionToDelete: $collectionToDelete,
-                    subcollectionParent: $subcollectionParent)
+                    subcollectionParent: $subcollectionParent,
+                    renamingCollectionId: $renamingCollectionId,
+                    renameText: $renameText)
                 if showingNewCollection {
                     TextField("Collection name", text: $newCollectionName)
                     .onSubmit {
@@ -811,6 +815,9 @@ private struct CollectionTree: View {
     let parentId: Int64?
     @Binding var collectionToDelete: RefmanCore.Collection?
     @Binding var subcollectionParent: RefmanCore.Collection?
+    @Binding var renamingCollectionId: Int64?
+    @Binding var renameText: String
+    @FocusState private var renameFieldFocused: Bool
 
     var body: some View {
         ForEach(model.collections.filter { $0.parentId == parentId }, id: \.id) { collection in
@@ -819,7 +826,9 @@ private struct CollectionTree: View {
                     CollectionTree(
                         parentId: collection.id,
                         collectionToDelete: $collectionToDelete,
-                        subcollectionParent: $subcollectionParent)
+                        subcollectionParent: $subcollectionParent,
+                        renamingCollectionId: $renamingCollectionId,
+                        renameText: $renameText)
                 } label: {
                     row(for: collection)
                 }
@@ -834,8 +843,26 @@ private struct CollectionTree: View {
         }
     }
 
+    @ViewBuilder
     private func row(for collection: RefmanCore.Collection) -> some View {
-        Label(collection.name, systemImage: collection.icon ?? "folder")
+        if renamingCollectionId == collection.id {
+            Label {
+                TextField("Name", text: $renameText)
+                    .textFieldStyle(.plain)
+                    .focused($renameFieldFocused)
+                    .onAppear { renameFieldFocused = true }
+                    .onSubmit { commitRename(collection) }
+                    .onExitCommand { renamingCollectionId = nil }
+                    .onChange(of: renameFieldFocused) { _, focused in
+                        if !focused, renamingCollectionId == collection.id {
+                            commitRename(collection)
+                        }
+                    }
+            } icon: {
+                Image(systemName: collection.icon ?? "folder")
+            }
+        } else {
+            Label(collection.name, systemImage: collection.icon ?? "folder")
             .contextMenu {
                 Menu("Icon") {
                     ForEach(LibraryView.collectionIcons, id: \.group) { group in
@@ -849,6 +876,10 @@ private struct CollectionTree: View {
                             }
                         }
                     }
+                }
+                Button("Rename") {
+                    renameText = collection.name
+                    renamingCollectionId = collection.id
                 }
                 Button("New Subcollection") {
                     subcollectionParent = collection
@@ -884,6 +915,15 @@ private struct CollectionTree: View {
                 model.add(documentIds: ids, toCollection: collection.id!)
                 return true
             }
+        }
+    }
+
+    private func commitRename(_ collection: RefmanCore.Collection) {
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty, name != collection.name {
+            model.renameCollection(id: collection.id!, to: name)
+        }
+        renamingCollectionId = nil
     }
 }
 
