@@ -1340,12 +1340,27 @@ struct AnnotationBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
+            if showNoteEditor {
+                noteEditor
+            } else {
+                bubbleContent
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+
+    private var bubbleContent: some View {
+        VStack(alignment: .leading, spacing: 7) {
             // Left-clicking a highlight reveals its note here, like a tooltip;
-            // clicking the text opens the editor.
+            // clicking the text opens the editor in place.
             if hasNote {
                 Button {
-                    noteDraft = note
-                    showNoteEditor = true
+                    editNote()
                 } label: {
                     Text(note)
                         .font(.callout)
@@ -1378,8 +1393,7 @@ struct AnnotationBubble: View {
                 separator
 
                 Button {
-                    noteDraft = note
-                    showNoteEditor = true
+                    editNote()
                 } label: {
                     Image(systemName: hasNote ? "note.text" : "note.text.badge.plus")
                         .font(.system(size: 12, weight: .medium))
@@ -1387,9 +1401,6 @@ struct AnnotationBubble: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(hasNote ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
                 .help(hasNote ? "Edit note" : "Add note")
-                .popover(isPresented: $showNoteEditor, arrowEdge: .bottom) {
-                    noteEditor
-                }
 
                 separator
 
@@ -1405,12 +1416,11 @@ struct AnnotationBubble: View {
                 .help("Remove this annotation")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(
-            Color(nsColor: .controlBackgroundColor),
-            in: RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+
+    private func editNote() {
+        noteDraft = note
+        showNoteEditor = true
     }
 
     private var noteEditor: some View {
@@ -1420,25 +1430,30 @@ struct AnnotationBubble: View {
                 onSave: saveNote,
                 onCancel: { showNoteEditor = false }
             )
-            .frame(width: 240, height: 110)
+            .frame(height: 90)
             .padding(6)
             .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
-            HStack {
+            HStack(spacing: 8) {
                 if hasNote {
                     Button("Remove", role: .destructive) {
                         reader.setNote("", for: annotation)
                         showNoteEditor = false
                     }
+                    .controlSize(.small)
                 }
                 Spacer()
-                Text("⇧↩ to save")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Button("Save", action: saveNote)
+                Button(action: saveNote) {
+                    HStack(spacing: 5) {
+                        Text("Save")
+                        Text("⇧⏎").foregroundStyle(.secondary)
+                    }
+                }
+                .controlSize(.small)
+                .help("Save note (Shift-Return)")
             }
         }
-        .padding(12)
+        .frame(width: 240)
     }
 
     private func saveNote() {
