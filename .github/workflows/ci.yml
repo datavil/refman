@@ -41,12 +41,25 @@ jobs:
           ditto -c -k --keepParent dist/Refman.app "Refman-${{ github.ref_name }}.zip"
       - name: Package dmg
         run: |
-          mkdir -p dmg-staging
-          cp -R dist/Refman.app dmg-staging/
-          ln -s /Applications dmg-staging/Applications
-          hdiutil create -volname "Refman ${{ github.ref_name }}" \
-            -srcfolder dmg-staging -ov -format UDZO \
-            "Refman-${{ github.ref_name }}.dmg"
+          VOL="Refman"
+          STAGE=dmg-staging
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/.background"
+          cp -R dist/Refman.app "$STAGE/"
+          cp assets/dmg-background.tiff "$STAGE/.background/background.tiff"
+          ln -s /Applications "$STAGE/Applications"
+          # Read-write image we can style, then compress to the final read-only dmg.
+          hdiutil create -volname "$VOL" -srcfolder "$STAGE" \
+            -fs HFS+ -format UDRW -ov rw.dmg
+          DEV=$(hdiutil attach -readwrite -noverify -noautoopen rw.dmg \
+            | grep '^/dev/' | head -1 | awk '{print $1}')
+          sleep 2
+          osascript scripts/dmg-window.applescript "$VOL"
+          sync
+          hdiutil detach "$DEV" || hdiutil detach "$DEV" -force
+          hdiutil convert rw.dmg -format UDZO -imagekey zlib-level=9 -ov \
+            -o "Refman-${{ github.ref_name }}.dmg"
+          rm -f rw.dmg
       - name: Write release notes
         run: |
           cat > release-notes.md <<'EOF'
