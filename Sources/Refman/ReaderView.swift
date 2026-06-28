@@ -667,6 +667,12 @@ final class ReaderModel: ObservableObject {
         clickedAnnotationRect = nil
     }
 
+    /// Esc dismissal: hide the selection pen and the clicked-annotation bubble.
+    func dismissFloating() {
+        pdfView?.clearSelection()  // also clears hasSelection / selectionRect
+        clearClickedAnnotation()
+    }
+
     private func currentSelectionViewRect() -> CGRect? {
         guard let view = pdfView, let selection = view.currentSelection,
             !(selection.string?.isEmpty ?? true),
@@ -990,6 +996,7 @@ final class MarkupClickPDFView: PDFView {
     var onMarkupClick: ((PDFAnnotation, PDFPage) -> Void)?
     var onEmptyClick: (() -> Void)?
     var onMarkupRemove: ((PDFAnnotation, PDFPage) -> Void)?
+    var onCancel: (() -> Void)?
 
     private var menuMarkup: (annotation: PDFAnnotation, page: PDFPage)?
 
@@ -1032,6 +1039,15 @@ final class MarkupClickPDFView: PDFView {
         onMarkupRemove?(annotation, page)
     }
 
+    override func keyDown(with event: NSEvent) {
+        // Esc hides the floating selection pen / annotation bubble.
+        if event.keyCode == 53 {
+            onCancel?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         var hit: (PDFAnnotation, PDFPage)?
@@ -1070,6 +1086,9 @@ struct PDFKitView: NSViewRepresentable {
         }
         view.onMarkupRemove = { [weak reader] annotation, page in
             reader?.removeMarkup(annotation, on: page)
+        }
+        view.onCancel = { [weak reader] in
+            reader?.dismissFloating()
         }
         view.autoScales = true
         view.displayMode = .singlePageContinuous
@@ -1306,7 +1325,6 @@ struct AnnotationBubble: View {
     private var highlightPalette = AnnotationOptions.defaultPalette
     @State private var showNoteEditor = false
     @State private var noteDraft = ""
-    @FocusState private var noteFocused: Bool
 
     private var paletteColors: [(name: String, color: NSColor)] {
         highlightPalette.split(separator: ",").compactMap { hex in
@@ -1322,13 +1340,22 @@ struct AnnotationBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            // Left-clicking a highlight reveals its note here, like a tooltip.
+            // Left-clicking a highlight reveals its note here, like a tooltip;
+            // clicking the text opens the editor.
             if hasNote {
-                Text(note)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 240, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    noteDraft = note
+                    showNoteEditor = true
+                } label: {
+                    Text(note)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: 240, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Edit note")
             }
             HStack(spacing: 10) {
                 ForEach(paletteColors, id: \.name) { entry in
@@ -1388,14 +1415,15 @@ struct AnnotationBubble: View {
 
     private var noteEditor: some View {
         VStack(spacing: 8) {
-            TextEditor(text: $noteDraft)
-                .font(.callout)
-                .focused($noteFocused)
-                .scrollContentBackground(.hidden)
-                .frame(width: 240, height: 110)
-                .padding(6)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+            FocusedTextEditor(
+                text: $noteDraft,
+                onSave: saveNote,
+                onCancel: { showNoteEditor = false }
+            )
+            .frame(width: 240, height: 110)
+            .padding(6)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
             HStack {
                 if hasNote {
                     Button("Remove", role: .destructive) {
@@ -1404,24 +1432,104 @@ struct AnnotationBubble: View {
                     }
                 }
                 Spacer()
-                Button("Save") {
-                    reader.setNote(noteDraft, for: annotation)
-                    showNoteEditor = false
-                }
-                .keyboardShortcut(.defaultAction)
+                Text("⇧↩ to save")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Button("Save", action: saveNote)
             }
         }
         .padding(12)
-        .task {
-            // The popover window isn't key yet on appear, so an immediate focus
-            // is dropped; wait a beat for it to settle before grabbing the caret.
-            try? await Task.sleep(for: .milliseconds(120))
-            noteFocused = true
-        }
+    }
+
+    private func saveNote() {
+        reader.setNote(noteDraft, for: annotation)
+        showNoteEditor = false
     }
 
     private var separator: some View {
         Rectangle().fill(.quaternary).frame(width: 1, height: 18)
+    }
+}
+
+/// Multi-line note editor that grabs the keyboard focus as soon as it appears.
+/// SwiftUI's TextEditor + @FocusState doesn't reliably focus inside a popover,
+/// leaving no caret until the user clicks; an NSTextView focuses itself.
+struct FocusedTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    /// Shift+Return (save) and Esc (cancel), since the focused text view eats
+    /// these keys before any SwiftUI button shortcut can.
+    var onSave: () -> Void = {}
+    var onCancel: () -> Void = {}
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = FocusGrabbingTextView()
+        textView.delegate = context.coordinator
+        textView.string = text
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.isRichText = false
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 2, height: 4)
+        textView.isVerticallyResizable = true
+        textView.textContainer?.widthTracksTextView = true
+        textView.onSave = onSave
+        textView.onCancel = onCancel
+
+        let scroll = NSScrollView()
+        scroll.documentView = textView
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let textView = scroll.documentView as? FocusGrabbingTextView else { return }
+        if textView.string != text { textView.string = text }
+        // Refresh so the closures see the latest draft text and view state.
+        textView.onSave = onSave
+        textView.onCancel = onCancel
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding var text: String
+        init(text: Binding<String>) { _text = text }
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            text = tv.string
+        }
+    }
+}
+
+/// Becomes first responder once it's placed in a window, so the caret shows
+/// immediately when the popover appears; routes Shift+Return / Esc to its hosts.
+final class FocusGrabbingTextView: NSTextView {
+    var onSave: (() -> Void)?
+    var onCancel: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            // The popover window isn't key yet while it animates in, so AppKit
+            // skips starting the caret-blink timer; make it key, take focus, and
+            // restart the timer so the insertion point is drawn right away.
+            window.makeKey()
+            window.makeFirstResponder(self)
+            self.updateInsertionPointStateAndRestartTimer(true)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 36 where event.modifierFlags.contains(.shift):  // Shift+Return
+            onSave?()
+        case 53:  // Esc
+            onCancel?()
+        default:
+            super.keyDown(with: event)
+        }
     }
 }
 
