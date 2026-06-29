@@ -743,8 +743,11 @@ final class ReaderModel: ObservableObject {
             }
             var quads: [[Double]] = []
             for line in lineSelections {
-                let b = line.bounds(for: page)
+                var b = line.bounds(for: page)
                 guard !b.isEmpty else { continue }
+                // Trim the highlight band slightly so it hugs the text rather
+                // than the full line box. Underlines keep their baseline.
+                if kind == .highlight { b = b.insetBy(dx: 0, dy: b.height * 0.08) }
                 quads.append([
                     b.minX, b.maxY, b.maxX, b.maxY,
                     b.minX, b.minY, b.maxX, b.minY,
