@@ -201,11 +201,15 @@ struct LibraryView: View {
                             Button("RIS…") {
                                 model.exportViaPanel(format: .ris)
                             }
-                            Button("PDFs…") {
-                                model.exportBundleViaPanel(collectionId: nil)
+                            Button("XML…") {
+                                model.exportViaPanel(format: .endNoteXML)
                             }
-                            Button("RIS + BibTeX + PDFs…") {
-                                model.exportBundleViaPanel(collectionId: nil, includeRIS: true)
+                            Button("PDFs…") {
+                                model.exportBundleViaPanel(collectionId: nil, includeBibTeX: false)
+                            }
+                            Button("BibTeX + RIS + XML + PDFs…") {
+                                model.exportBundleViaPanel(
+                                    collectionId: nil, includeRIS: true, includeXML: true)
                             }
                         }
                     }
@@ -488,11 +492,15 @@ struct LibraryView: View {
                     Button("RIS…") {
                         model.exportViaPanel(format: .ris, documentIds: Array(ids))
                     }
-                    Button("PDFs…") {
-                        model.exportBundleViaPanel(documentIds: Array(ids))
+                    Button("XML…") {
+                        model.exportViaPanel(format: .endNoteXML, documentIds: Array(ids))
                     }
-                    Button("RIS + BibTeX + PDFs…") {
-                        model.exportBundleViaPanel(documentIds: Array(ids), includeRIS: true)
+                    Button("PDFs…") {
+                        model.exportBundleViaPanel(documentIds: Array(ids), includeBibTeX: false)
+                    }
+                    Button("BibTeX + RIS + XML + PDFs…") {
+                        model.exportBundleViaPanel(
+                            documentIds: Array(ids), includeRIS: true, includeXML: true)
                     }
                 }
                 Menu("Add to Collection") {
@@ -883,13 +891,18 @@ private struct CollectionTree: View {
                         model.exportViaPanel(
                             format: .ris, collectionId: collection.id!, name: collection.name)
                     }
+                    Button("XML…") {
+                        model.exportViaPanel(
+                            format: .endNoteXML, collectionId: collection.id!, name: collection.name)
+                    }
                     Button("PDFs…") {
                         model.exportBundleViaPanel(
-                            collectionId: collection.id!, name: collection.name)
+                            collectionId: collection.id!, name: collection.name, includeBibTeX: false)
                     }
-                    Button("RIS + BibTeX + PDFs…") {
+                    Button("BibTeX + RIS + XML + PDFs…") {
                         model.exportBundleViaPanel(
-                            collectionId: collection.id!, name: collection.name, includeRIS: true)
+                            collectionId: collection.id!, name: collection.name,
+                            includeRIS: true, includeXML: true)
                     }
                 }
                 Button("Import from Folder…") {

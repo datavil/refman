@@ -14,10 +14,12 @@ public enum LibraryBundle {
         public var copyErrors: [String]
     }
 
-    /// Writes the bundle at `bundle`, replacing any existing item there. When
-    /// `includeRIS` is set, a `library.ris` is written alongside `library.bib`.
+    /// Writes the bundle at `bundle`, replacing any existing item there. The
+    /// PDFs are always copied; `includeBibTeX`/`includeRIS`/`includeXML` control
+    /// which bibliography sidecars (`library.bib`/`.ris`/`.xml`) accompany them.
     public static func export(
-        _ items: [DocumentDetails], store: LibraryStore, to bundle: URL, includeRIS: Bool = false
+        _ items: [DocumentDetails], store: LibraryStore, to bundle: URL,
+        includeBibTeX: Bool = true, includeRIS: Bool = false, includeXML: Bool = false
     ) throws -> Result {
         let fm = FileManager.default
         if fm.fileExists(atPath: bundle.path) { try fm.removeItem(at: bundle) }
@@ -53,11 +55,17 @@ public enum LibraryBundle {
             }
             entries.append(BibTeX.export(item, file: relPath))
         }
-        let bib = entries.joined(separator: "\n\n") + "\n"
-        try Data(bib.utf8).write(to: bundle.appendingPathComponent("library.bib"))
+        if includeBibTeX {
+            let bib = entries.joined(separator: "\n\n") + "\n"
+            try Data(bib.utf8).write(to: bundle.appendingPathComponent("library.bib"))
+        }
         if includeRIS {
             try Data(RIS.export(items).utf8).write(
                 to: bundle.appendingPathComponent("library.ris"))
+        }
+        if includeXML {
+            try Data(EndNoteXML.export(items).utf8).write(
+                to: bundle.appendingPathComponent("library.xml"))
         }
         return Result(
             references: items.count, pdfs: copied,

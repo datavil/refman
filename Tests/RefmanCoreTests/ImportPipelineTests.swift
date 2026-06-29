@@ -92,11 +92,11 @@ import Testing
         #expect(try repo.allDocuments().count == 1)
     }
 
-    @Test func reimportingTrashedFileReportsConflictAndCanImportAsCopy() async throws {
+    @Test func reimportingTrashedFileReportsConflictAndCanReplace() async throws {
         let (pipeline, repo, store) = try makePipeline()
         defer { try? FileManager.default.removeItem(at: store.rootURL) }
 
-        let pdf = try makePDF(text: "A Trashed Paper\n\nsome body text")
+        let pdf = try makePDF(text: "A Trashed Paper\n\ndoi: 10.9999/trashed.001\n\nbody")
         defer { try? FileManager.default.removeItem(at: pdf) }
 
         guard case .imported(let result) = try await pipeline.importPDF(at: pdf) else {
@@ -104,6 +104,7 @@ import Testing
             return
         }
         let originalId = result.details.id
+        #expect(result.details.document.doi == "10.9999/trashed.001")
         try repo.delete(documentId: originalId)  // move to Trash
 
         // A trashed match is reported as a conflict, not a silent duplicate.
@@ -113,12 +114,14 @@ import Testing
         }
         #expect(existing.id == originalId)
 
-        // Importing as a copy adds a second, independent record sharing the file.
-        let copy = try await pipeline.importPDFAsNew(at: pdf)
-        #expect(copy.details.id != originalId)
-        #expect(copy.details.document.fileHash == existing.document.fileHash)
+        // Replace: purge the trashed row (freeing its unique DOI), then re-import.
+        // Without the purge this would hit the DOI UNIQUE constraint and throw.
+        try repo.purge(documentId: originalId)
+        let replaced = try await pipeline.importPDFAsNew(at: pdf)
+        #expect(replaced.details.id != originalId)
+        #expect(replaced.details.document.doi == "10.9999/trashed.001")
         let counts = try repo.counts()
         #expect(counts.live == 1)
-        #expect(counts.trashed == 1)
+        #expect(counts.trashed == 0)
     }
 }

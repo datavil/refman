@@ -40,7 +40,7 @@ struct IntegrityReport {
 }
 
 enum ExportFormat {
-    case bibtex, ris, cslJSON
+    case bibtex, ris, cslJSON, endNoteXML
 }
 
 @MainActor
@@ -196,7 +196,10 @@ final class AppModel: ObservableObject {
                         case .restore:
                             try repository.restore(documentId: existing.id)
                             log.append(.init(name: name, status: .imported))
-                        case .importNew:
+                        case .replace:
+                            // Drop the trashed record (frees its unique DOI), then
+                            // import the file fresh.
+                            try repository.purge(documentId: existing.id)
                             _ = try await pipeline.importPDFAsNew(at: sourceURL)
                             log.append(.init(name: name, status: .imported))
                         case .skip:
@@ -221,7 +224,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private enum TrashConflictChoice { case restore, importNew, skip }
+    private enum TrashConflictChoice { case restore, replace, skip }
 
     /// Asks what to do when an imported PDF matches a document in the Trash.
     private func promptTrashConflict(name: String, existing: DocumentDetails) -> TrashConflictChoice {
@@ -229,13 +232,14 @@ final class AppModel: ObservableObject {
         alert.messageText = "“\(existing.document.title)” is in the Trash"
         alert.informativeText =
             "\(name) matches a reference currently in your Trash. Restore the existing "
-            + "one, or import this file as a separate new copy?"
+            + "one, or replace it with a fresh import? Replacing permanently discards the "
+            + "trashed copy and its notes."
         alert.addButton(withTitle: "Restore")
-        alert.addButton(withTitle: "Import as Copy")
+        alert.addButton(withTitle: "Replace")
         alert.addButton(withTitle: "Skip")
         switch alert.runModal() {
         case .alertFirstButtonReturn: return .restore
-        case .alertSecondButtonReturn: return .importNew
+        case .alertSecondButtonReturn: return .replace
         default: return .skip
         }
     }
@@ -379,6 +383,9 @@ final class AppModel: ObservableObject {
             case .cslJSON:
                 panel.nameFieldStringValue = "\(base).json"
                 data = try CSLJSON.export(items)
+            case .endNoteXML:
+                panel.nameFieldStringValue = "\(base).xml"
+                data = Data(EndNoteXML.export(items).utf8)
             }
             guard panel.runModal() == .OK, let url = panel.url else { return }
             try data.write(to: url)
@@ -389,23 +396,32 @@ final class AppModel: ObservableObject {
     }
 
     /// Exports the whole library (nil) or one collection as a portable folder.
-    func exportBundleViaPanel(collectionId: Int64?, name: String? = nil, includeRIS: Bool = false) {
+    func exportBundleViaPanel(
+        collectionId: Int64?, name: String? = nil,
+        includeBibTeX: Bool = true, includeRIS: Bool = false, includeXML: Bool = false
+    ) {
         exportBundleViaPanel(
-            items: (try? repository.allDocuments(in: collectionId)) ?? [],
-            name: name, includeRIS: includeRIS)
+            items: (try? repository.allDocuments(in: collectionId)) ?? [], name: name,
+            includeBibTeX: includeBibTeX, includeRIS: includeRIS, includeXML: includeXML)
     }
 
     /// Exports an explicit set of documents (a selection or single paper).
-    func exportBundleViaPanel(documentIds ids: [Int64], includeRIS: Bool = false) {
+    func exportBundleViaPanel(
+        documentIds ids: [Int64],
+        includeBibTeX: Bool = true, includeRIS: Bool = false, includeXML: Bool = false
+    ) {
         exportBundleViaPanel(
-            items: ids.compactMap { try? repository.document(id: $0) },
-            name: nil, includeRIS: includeRIS)
+            items: ids.compactMap { try? repository.document(id: $0) }, name: nil,
+            includeBibTeX: includeBibTeX, includeRIS: includeRIS, includeXML: includeXML)
     }
 
-    /// Writes `items` as a portable folder: `library.bib` (and optionally
-    /// `library.ris`) plus the attached PDFs, linked by relative path so
-    /// Zotero/Mendeley import them.
-    private func exportBundleViaPanel(items: [DocumentDetails], name: String?, includeRIS: Bool) {
+    /// Writes `items` as a portable folder: the attached PDFs plus whichever
+    /// bibliography sidecars (`library.bib`/`.ris`/`.xml`) are requested, linked
+    /// by relative path so Zotero/Mendeley import them.
+    private func exportBundleViaPanel(
+        items: [DocumentDetails], name: String?,
+        includeBibTeX: Bool, includeRIS: Bool, includeXML: Bool
+    ) {
         guard !items.isEmpty else {
             statusMessage = "Nothing to export."
             return
@@ -420,7 +436,8 @@ final class AppModel: ObservableObject {
             guard panel.runModal() == .OK, let bundle = panel.url else { return }
 
             let result = try LibraryBundle.export(
-                items, store: store, to: bundle, includeRIS: includeRIS)
+                items, store: store, to: bundle,
+                includeBibTeX: includeBibTeX, includeRIS: includeRIS, includeXML: includeXML)
             var message =
                 "Exported \(result.references) reference\(result.references == 1 ? "" : "s") "
                 + "with \(result.pdfs) PDF\(result.pdfs == 1 ? "" : "s")"

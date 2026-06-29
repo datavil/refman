@@ -62,6 +62,7 @@ struct RefmanApp: App {
                 Button("Export Library as BibTeX…") { model.exportViaPanel(format: .bibtex) }
                 Button("Export Library as RIS…") { model.exportViaPanel(format: .ris) }
                 Button("Export Library as CSL-JSON…") { model.exportViaPanel(format: .cslJSON) }
+                Button("Export Library as XML…") { model.exportViaPanel(format: .endNoteXML) }
             }
             CommandGroup(after: .toolbar) {
                 Button("Quick Open…") { model.requestPalette() }

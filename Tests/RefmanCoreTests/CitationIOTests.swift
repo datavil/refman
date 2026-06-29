@@ -168,6 +168,30 @@ import Testing
     }
 }
 
+@Suite struct EndNoteXMLTests {
+    @Test func exportsWellFormedXMLWithFields() throws {
+        let details = DocumentDetails(
+            document: Document(
+                type: .article, title: "Things & <Stuff>", year: 2023,
+                venue: "J. Tests", volume: "5", issue: "2", pages: "1-10",
+                doi: "10.1/xml"),
+            authors: [Author(given: "Carol", family: "Coder")]
+        )
+        let xml = EndNoteXML.export([details])
+
+        // Parses as well-formed XML (verifies escaping of & and <>).
+        let parser = XMLParser(data: Data(xml.utf8))
+        #expect(parser.parse())
+
+        #expect(xml.contains("<ref-type name=\"Journal Article\">17</ref-type>"))
+        #expect(xml.contains("<author>Coder, Carol</author>"))
+        #expect(xml.contains("<title>Things &amp; &lt;Stuff&gt;</title>"))
+        #expect(xml.contains("<secondary-title>J. Tests</secondary-title>"))
+        #expect(xml.contains("<year>2023</year>"))
+        #expect(xml.contains("<electronic-resource-num>10.1/xml</electronic-resource-num>"))
+    }
+}
+
 @Suite struct CiteprocTests {
     let einstein = DocumentDetails(
         document: Document(

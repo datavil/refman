@@ -125,6 +125,28 @@ import Testing
         #expect(!fm.fileExists(atPath: plain.appendingPathComponent("library.ris").path))
     }
 
+    @Test func bundleSidecarsAreOptional() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("BundleTest-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: tmp) }
+        let store = try LibraryStore(rootURL: tmp.appendingPathComponent("store"))
+        let item = DocumentDetails(
+            document: Document(title: "Paper", year: 2021), authors: [Author(family: "Doe")])
+
+        // PDFs-only: no bibliography sidecars at all.
+        let pdfsOnly = tmp.appendingPathComponent("PDFsOnly")
+        _ = try LibraryBundle.export([item], store: store, to: pdfsOnly, includeBibTeX: false)
+        #expect(!fm.fileExists(atPath: pdfsOnly.appendingPathComponent("library.bib").path))
+
+        // Everything: bib + ris + xml.
+        let all = tmp.appendingPathComponent("All")
+        _ = try LibraryBundle.export(
+            [item], store: store, to: all, includeRIS: true, includeXML: true)
+        #expect(fm.fileExists(atPath: all.appendingPathComponent("library.bib").path))
+        #expect(fm.fileExists(atPath: all.appendingPathComponent("library.ris").path))
+        #expect(fm.fileExists(atPath: all.appendingPathComponent("library.xml").path))
+    }
+
     @Test func exportReplacesExistingBundle() throws {
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory.appendingPathComponent("BundleTest-\(UUID().uuidString)")
