@@ -363,12 +363,21 @@ struct UpdatesSettingsSection: View {
             LabeledContent("Version", value: Updater.currentVersion)
             HStack {
                 Button("Check for Updates") { updater.check(userInitiated: true) }
-                    .disabled(updater.status == .checking || updater.status == .downloading)
+                    .disabled(updater.status.isBusy)
                 if let detail = statusDetail { Text(detail).foregroundStyle(.secondary) }
                 Spacer()
                 if case .available = updater.status {
                     Button("Install") { updater.installPending() }
                 }
+            }
+            switch updater.status {
+            case .downloading(let fraction):
+                ProgressView(value: fraction, total: 1)
+                    .progressViewStyle(.linear)
+            case .unpacking:
+                ProgressView().controlSize(.small)
+            default:
+                EmptyView()
             }
             Text("Checks GitHub Releases and installs the latest version, then relaunches.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -381,7 +390,10 @@ struct UpdatesSettingsSection: View {
         case .checking: return "Checking…"
         case .upToDate: return "Up to date"
         case .available(let version): return "\(version) available"
-        case .downloading: return "Downloading…"
+        case .downloading(let fraction):
+            guard let fraction else { return "Downloading…" }
+            return "Downloading… \(fraction.formatted(.percent.precision(.fractionLength(0))))"
+        case .unpacking: return "Installing…"
         case .failed(let message): return message
         }
     }

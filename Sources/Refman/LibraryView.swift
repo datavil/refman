@@ -69,8 +69,8 @@ struct LibraryView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 189, ideal: 240)
-                .toolbar(removing: .sidebarToggle)
+                // Fixed width: the sidebar is unresizable but can be toggled.
+                .navigationSplitViewColumnWidth(LayoutReset.sidebarWidth)
         } content: {
             documentTable
                 .navigationSplitViewColumnWidth(min: 400, ideal: 560)
@@ -669,19 +669,17 @@ private struct ToolbarConfigurator: NSViewRepresentable {
                 toolbar.allowsDisplayModeCustomization = false
             }
         }
-        // Stop the leading sidebar from collapsing when dragged fully left.
         // SwiftUI's NavigationSplitView is backed by an NSSplitView whose delegate
         // is the (private) NSSplitViewController; it isn't in the VC tree, so reach
-        // it via the split view's delegate.
+        // it via the split view's delegate. Pin the sidebar to a fixed width
+        // (unresizable) while still letting the toolbar toggle collapse it.
         guard let split = window.contentView?.firstSplitViewInTree,
             let splitVC = split.delegate as? NSSplitViewController
         else { return }
         for item in splitVC.splitViewItems where item.behavior == .sidebar {
-            item.canCollapse = false
-            item.minimumThickness = 189
-            // SwiftUI's drag handling collapses the sidebar even with canCollapse
-            // = false, so watch isCollapsed and force it back open.
-            SidebarCollapseGuard.attach(to: item)
+            item.canCollapse = true
+            item.minimumThickness = LayoutReset.sidebarWidth
+            item.maximumThickness = LayoutReset.sidebarWidth
         }
         // On a fresh install SwiftUI doesn't reliably honor the columns' `ideal`
         // widths, so snap to the built-in defaults the first time.
@@ -689,30 +687,11 @@ private struct ToolbarConfigurator: NSViewRepresentable {
     }
 }
 
-/// Observes a split view item's `isCollapsed` and snaps it back open, defeating
-/// SwiftUI's drag-to-collapse on the library sidebar. Retained on the item.
-private final class SidebarCollapseGuard {
-    private var observation: NSKeyValueObservation?
-
-    static func attach(to item: NSSplitViewItem) {
-        if objc_getAssociatedObject(item, &guardKey) != nil { return }
-        let guardian = SidebarCollapseGuard()
-        guardian.observation = item.observe(\.isCollapsed, options: [.new]) { item, _ in
-            if item.isCollapsed {
-                DispatchQueue.main.async { item.isCollapsed = false }
-            }
-        }
-        objc_setAssociatedObject(item, &guardKey, guardian, .OBJC_ASSOCIATION_RETAIN)
-    }
-}
-
-private var guardKey: UInt8 = 0
-
 /// Restores window size and sidebar widths to their built-in defaults.
 enum LayoutReset {
     /// Sidebar/inspector ideal widths and the library window's default size.
     /// Keep these in sync with `navigationSplitViewColumnWidth` and `defaultSize`.
-    static let sidebarWidth: CGFloat = 240
+    static let sidebarWidth: CGFloat = 260
     static let inspectorWidth: CGFloat = 470
     static let windowSize = NSSize(width: 1280, height: 800)
 
@@ -777,7 +756,8 @@ private struct SidebarFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if case .available(let version) = updater.status {
+            switch updater.status {
+            case .available(let version):
                 Button {
                     updater.installPending()
                 } label: {
@@ -787,6 +767,16 @@ private struct SidebarFooter: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .help("Install Refman \(version) and relaunch")
+            case .downloading(let fraction):
+                ProgressView(value: fraction, total: 1) {
+                    Text("Downloading update…").font(.caption)
+                }
+                .progressViewStyle(.linear)
+            case .unpacking:
+                ProgressView { Text("Installing update…").font(.caption) }
+                    .controlSize(.small)
+            default:
+                EmptyView()
             }
             Button {
                 openAISettings()

@@ -68,7 +68,9 @@ struct RefmanApp: App {
                     .keyboardShortcut("k", modifiers: [.command])
             }
             CommandGroup(after: .sidebar) {
-                Button("Reset Layout to Default") { LayoutReset.run() }
+                Button("Reset Layout to Default", systemImage: "arrow.counterclockwise") {
+                    LayoutReset.run()
+                }
             }
             CommandMenu("Library") {
                 Button("Move to Trash") { model.delete(documentIds: Array(model.selectedDocumentIds)) }

@@ -14,8 +14,19 @@ final class Updater: ObservableObject {
         case checking
         case upToDate
         case available(version: String)
-        case downloading
+        /// Fetching the zip; `fraction` is 0...1, or nil while the size is unknown.
+        case downloading(fraction: Double?)
+        /// Extracting the downloaded zip — no granular progress available.
+        case unpacking
         case failed(String)
+
+        /// True while a check or install is in flight, used to disable controls.
+        var isBusy: Bool {
+            switch self {
+            case .checking, .downloading, .unpacking: return true
+            default: return false
+            }
+        }
     }
 
     @Published private(set) var status: Status = .idle
@@ -67,7 +78,7 @@ final class Updater: ObservableObject {
     /// Fetches the latest release and compares it to the running version.
     /// `userInitiated` surfaces the result (and any error) in an alert.
     func check(userInitiated: Bool) {
-        guard status != .checking, status != .downloading else { return }
+        guard !status.isBusy else { return }
         status = .checking
         Task {
             do {
@@ -106,7 +117,7 @@ final class Updater: ObservableObject {
             NSWorkspace.shared.open(latest.page)
             return
         }
-        status = .downloading
+        status = .downloading(fraction: nil)
         Task {
             do {
                 try await downloadAndSwap(zipURL: latest.zipURL, target: target)
@@ -135,8 +146,9 @@ final class Updater: ObservableObject {
     }
 
     private func downloadAndSwap(zipURL: URL, target: URL) async throws {
-        let (downloaded, _) = try await URLSession.shared.download(from: zipURL)
+        let downloaded = try await download(zipURL)
         // Unpack immediately — the temporary download is short-lived.
+        status = .unpacking
         let stage = FileManager.default.temporaryDirectory
             .appendingPathComponent("RefmanUpdate-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
@@ -147,6 +159,21 @@ final class Updater: ObservableObject {
                 userInfo: [NSLocalizedDescriptionKey: "No Refman.app found in the download."])
         }
         scheduleSwapAndRelaunch(newApp: newApp, target: target)
+    }
+
+    /// Downloads `url`, reporting progress onto `status`, and returns a stable
+    /// file URL. Uses a session-scoped delegate because the per-task delegate of
+    /// `download(from:delegate:)` does not receive `didWriteData` callbacks.
+    private func download(_ url: URL) async throws -> URL {
+        let delegate = DownloadProgressDelegate { [weak self] fraction in
+            Task { @MainActor in self?.status = .downloading(fraction: fraction) }
+        }
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return try await withCheckedThrowingContinuation { continuation in
+            delegate.continuation = continuation
+            session.downloadTask(with: url).resume()
+        }
     }
 
     /// Writes a helper that waits for this process to exit, replaces the bundle,
@@ -231,5 +258,52 @@ final class Updater: ObservableObject {
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+}
+
+/// Session delegate that reports download progress and bridges completion to an
+/// async continuation. Callbacks arrive serially on the session's delegate queue.
+private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate,
+    @unchecked Sendable
+{
+    private let onProgress: @Sendable (Double) -> Void
+    var continuation: CheckedContinuation<URL, Error>?
+
+    init(onProgress: @escaping @Sendable (Double) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(
+        _ session: URLSession, downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+    }
+
+    func urlSession(
+        _ session: URLSession, downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        // The system reclaims `location` once this returns, so move it out first.
+        let stable = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RefmanDownload-\(UUID().uuidString).zip")
+        do {
+            try FileManager.default.moveItem(at: location, to: stable)
+            continuation?.resume(returning: stable)
+        } catch {
+            continuation?.resume(throwing: error)
+        }
+        continuation = nil
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?
+    ) {
+        if let error {
+            continuation?.resume(throwing: error)
+            continuation = nil
+        }
     }
 }
