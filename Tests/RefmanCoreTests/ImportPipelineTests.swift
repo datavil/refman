@@ -68,8 +68,10 @@ import Testing
                 """)
         defer { try? FileManager.default.removeItem(at: pdf) }
 
-        let result = try await pipeline.importPDF(at: pdf)
-        #expect(!result.wasDuplicate)
+        guard case .imported(let result) = try await pipeline.importPDF(at: pdf) else {
+            Issue.record("expected a fresh import")
+            return
+        }
         #expect(!result.resolvedOnline)  // network unroutable by construction
 
         let doc = result.details.document
@@ -81,10 +83,42 @@ import Testing
         // Full text landed in the FTS index.
         #expect(try repo.search("methodology").count == 1)
 
-        // Re-importing the identical file is a no-op.
-        let again = try await pipeline.importPDF(at: pdf)
-        #expect(again.wasDuplicate)
-        #expect(again.details.id == result.details.id)
+        // Re-importing the identical file is a no-op duplicate.
+        guard case .duplicate(let dup) = try await pipeline.importPDF(at: pdf) else {
+            Issue.record("expected a duplicate")
+            return
+        }
+        #expect(dup.id == result.details.id)
         #expect(try repo.allDocuments().count == 1)
+    }
+
+    @Test func reimportingTrashedFileReportsConflictAndCanImportAsCopy() async throws {
+        let (pipeline, repo, store) = try makePipeline()
+        defer { try? FileManager.default.removeItem(at: store.rootURL) }
+
+        let pdf = try makePDF(text: "A Trashed Paper\n\nsome body text")
+        defer { try? FileManager.default.removeItem(at: pdf) }
+
+        guard case .imported(let result) = try await pipeline.importPDF(at: pdf) else {
+            Issue.record("expected a fresh import")
+            return
+        }
+        let originalId = result.details.id
+        try repo.delete(documentId: originalId)  // move to Trash
+
+        // A trashed match is reported as a conflict, not a silent duplicate.
+        guard case .inTrash(let existing, _) = try await pipeline.importPDF(at: pdf) else {
+            Issue.record("expected a trashed conflict")
+            return
+        }
+        #expect(existing.id == originalId)
+
+        // Importing as a copy adds a second, independent record sharing the file.
+        let copy = try await pipeline.importPDFAsNew(at: pdf)
+        #expect(copy.details.id != originalId)
+        #expect(copy.details.document.fileHash == existing.document.fileHash)
+        let counts = try repo.counts()
+        #expect(counts.live == 1)
+        #expect(counts.trashed == 1)
     }
 }

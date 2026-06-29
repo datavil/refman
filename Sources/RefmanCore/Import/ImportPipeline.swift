@@ -40,17 +40,42 @@ public struct ImportPipeline: Sendable {
         self.pdfFetcher = pdfFetcher
     }
 
+    /// Outcome of importing a single PDF.
+    public enum PDFOutcome: Sendable {
+        case imported(Result)
+        /// A live (non-trashed) document already holds these bytes; skipped.
+        case duplicate(DocumentDetails)
+        /// The matching document is in the Trash; the caller must decide whether
+        /// to restore it or import the file as a separate new copy.
+        case inTrash(existing: DocumentDetails, sourceURL: URL)
+    }
+
     /// Imports one PDF. Network failures degrade gracefully to offline metadata.
-    public func importPDF(at url: URL) async throws -> Result {
+    public func importPDF(at url: URL) async throws -> PDFOutcome {
         let hash = try store.ingest(fileAt: url)
 
-        // Same bytes already in the library? Return the existing record.
+        // Same bytes already on file? Surface the existing record so the caller
+        // can skip a live duplicate or prompt about a trashed one.
         if let existing = try repository.document(fileHash: hash),
             let details = try repository.document(id: existing.id!)
         {
-            return Result(details: details, wasDuplicate: true, resolvedOnline: false)
+            return existing.deletedAt == nil
+                ? .duplicate(details)
+                : .inTrash(existing: details, sourceURL: url)
         }
 
+        return .imported(try await ingest(hash: hash, url: url))
+    }
+
+    /// Imports `url` as a brand-new record even when its bytes match an existing
+    /// (e.g. trashed) document — used when the user opts to keep a separate copy.
+    public func importPDFAsNew(at url: URL) async throws -> Result {
+        let hash = try store.ingest(fileAt: url)
+        return try await ingest(hash: hash, url: url)
+    }
+
+    /// Extracts text, resolves metadata online, and inserts a fresh document row.
+    private func ingest(hash: String, url: URL) async throws -> Result {
         let extracted = PDFTextExtractor.extract(from: store.url(forHash: hash))
         let head = extracted?.headText ?? ""
         let doi = IdentifierScanner.firstDOI(in: head)

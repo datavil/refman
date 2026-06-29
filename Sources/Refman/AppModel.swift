@@ -186,8 +186,23 @@ final class AppModel: ObservableObject {
                 importProgress = (i, pdfs.count)
                 let name = url.lastPathComponent
                 do {
-                    let result = try await pipeline.importPDF(at: url)
-                    log.append(.init(name: name, status: result.wasDuplicate ? .duplicate : .imported))
+                    switch try await pipeline.importPDF(at: url) {
+                    case .imported:
+                        log.append(.init(name: name, status: .imported))
+                    case .duplicate:
+                        log.append(.init(name: name, status: .duplicate))
+                    case .inTrash(let existing, let sourceURL):
+                        switch promptTrashConflict(name: name, existing: existing) {
+                        case .restore:
+                            try repository.restore(documentId: existing.id)
+                            log.append(.init(name: name, status: .imported))
+                        case .importNew:
+                            _ = try await pipeline.importPDFAsNew(at: sourceURL)
+                            log.append(.init(name: name, status: .imported))
+                        case .skip:
+                            log.append(.init(name: name, status: .duplicate))
+                        }
+                    }
                 } catch {
                     log.append(.init(name: name, status: .failed))
                 }
@@ -203,6 +218,25 @@ final class AppModel: ObservableObject {
             if failures > 0 { parts.append("\(failures) failed") }
             statusMessage = parts.joined(separator: ", ")
             reload()
+        }
+    }
+
+    private enum TrashConflictChoice { case restore, importNew, skip }
+
+    /// Asks what to do when an imported PDF matches a document in the Trash.
+    private func promptTrashConflict(name: String, existing: DocumentDetails) -> TrashConflictChoice {
+        let alert = NSAlert()
+        alert.messageText = "“\(existing.document.title)” is in the Trash"
+        alert.informativeText =
+            "\(name) matches a reference currently in your Trash. Restore the existing "
+            + "one, or import this file as a separate new copy?"
+        alert.addButton(withTitle: "Restore")
+        alert.addButton(withTitle: "Import as Copy")
+        alert.addButton(withTitle: "Skip")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .restore
+        case .alertSecondButtonReturn: return .importNew
+        default: return .skip
         }
     }
 
