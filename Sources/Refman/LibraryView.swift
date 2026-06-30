@@ -118,6 +118,8 @@ struct LibraryView: View {
         }
         .onChange(of: model.addRequested) { showingAddPopover = true }
         .onChange(of: model.paletteRequested) { showingPalette = true }
+        .onChange(of: model.aiSettingsRequested) { openWindow(id: "ai-settings") }
+        .onChange(of: model.settingsRequested) { openSettings() }
         .sheet(isPresented: $showingPalette) {
             CommandPalette(isPresented: $showingPalette)
         }
@@ -126,12 +128,15 @@ struct LibraryView: View {
         }
         .navigationTitle("")
         .toolbar {
-            ToolbarItem {
+            ToolbarItem(placement: .navigation) {
                 Button {
                     showingAddPopover = true
                 } label: {
-                    Label("Add Reference", systemImage: "plus.circle")
+                    Label("Add a Reference", systemImage: "plus.circle.fill")
+                        .labelStyle(.titleAndIcon)
                 }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
                 .help("Add a reference")
                 .popover(isPresented: $showingAddPopover, arrowEdge: .bottom) {
                     addPopover
@@ -420,10 +425,9 @@ struct LibraryView: View {
             .customizationID("venue")
             TableColumn("PDF") { details in
                 if details.document.fileHash != nil {
-                    Image(nsImage: colorScheme == .dark ? Self.pdfIconWhite : Self.pdfIcon)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 16, height: 16)
+                    Image(systemName: "document.circle")
+                        .imageScale(.large)
+                        .foregroundStyle(.secondary)
                 }
             }
             .width(36)

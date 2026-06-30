@@ -67,8 +67,21 @@ struct RefmanApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Quick Open…") { model.requestPalette() }
                     .keyboardShortcut("k", modifiers: [.command])
+                Button("Settings…") { model.requestSettings() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("AI Settings…") { model.requestAISettings() }
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
             }
+            // The default app-menu Settings item carries the reserved ⌘,, which
+            // isn't reaching the app here; drop it so the working ⌘⇧S item above
+            // is the single Settings command.
+            CommandGroup(replacing: .appSettings) {}
             CommandGroup(after: .sidebar) {
+                Button("Toggle Light / Dark") {
+                    appearance = (AppAppearance(rawValue: appearance) == .dark
+                        ? AppAppearance.light : .dark).rawValue
+                }
+                .keyboardShortcut("l", modifiers: [.command])
                 Button("Reset Layout to Default", systemImage: "arrow.counterclockwise") {
                     LayoutReset.run()
                 }

@@ -80,6 +80,8 @@ final class AppModel: ObservableObject {
     /// Incremented to ask the UI to surface the add-reference popover / command palette.
     @Published var addRequested = 0
     @Published var paletteRequested = 0
+    @Published var aiSettingsRequested = 0
+    @Published var settingsRequested = 0
 
     init(repository: LibraryRepository, store: LibraryStore) {
         self.repository = repository
@@ -744,6 +746,8 @@ final class AppModel: ObservableObject {
 
     func requestAdd() { addRequested += 1 }
     func requestPalette() { paletteRequested += 1 }
+    func requestAISettings() { aiSettingsRequested += 1 }
+    func requestSettings() { settingsRequested += 1 }
 
     // MARK: - Library maintenance
 
