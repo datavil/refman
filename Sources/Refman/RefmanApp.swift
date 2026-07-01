@@ -2,8 +2,16 @@ import AppKit
 import RefmanCore
 import SwiftUI
 
+/// Stops the Ollama server Refman started (if any) when the app quits.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        ProviderSetupModel.stopStartedServer()
+    }
+}
+
 @main
 struct RefmanApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel.live()
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
 

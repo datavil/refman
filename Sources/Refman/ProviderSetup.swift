@@ -29,11 +29,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
 
     var install: Install {
         switch self {
-        case .ollama:
-            return .script(
-                "curl -fsSL https://ollama.com/download/Ollama-darwin.zip -o /tmp/Ollama-darwin.zip"
-                    + " && ditto -x -k /tmp/Ollama-darwin.zip /Applications"
-                    + " && rm -f /tmp/Ollama-darwin.zip && open -a Ollama")
+        case .ollama: return .script("curl -fsSL https://ollama.com/install.sh | sh")
         case .openai: return .script("curl -fsSL https://chatgpt.com/codex/install.sh | sh")
         case .claude: return .script("curl -fsSL https://claude.ai/install.sh | bash")
         }
@@ -80,6 +76,8 @@ final class ProviderSetupModel: ObservableObject {
     @Published private(set) var pullingModel: String?
     @Published private(set) var pullFraction: Double?
     @Published private(set) var pullStatus: String?
+    /// Progress (0...1) parsed from an install script's output, nil while unknown.
+    @Published private(set) var installFraction: Double?
 
     private var ollamaHost: String {
         ProcessInfo.processInfo.environment["REFMAN_OLLAMA_HOST"] ?? "http://127.0.0.1:11434"
@@ -125,17 +123,43 @@ final class ProviderSetupModel: ObservableObject {
         }
     }
 
-    /// Launches the Ollama app (or the bare server) and re-checks.
+    /// PID of an `ollama serve` that Refman itself started. Process-lifetime (not
+    /// tied to the transient settings view) so it can be stopped on app quit. Nil
+    /// when Ollama was already running (user/GUI-managed) — that one we leave be.
+    static var startedServerPID: Int32?
+
+    /// Starts the headless Ollama server (`ollama serve`) — not the GUI app — and
+    /// re-checks. Detached via `nohup` so it outlives this launch shell; its PID
+    /// is recorded so `stopStartedServer()` can shut it down when Refman quits.
     func startOllama() {
         busyProvider = .ollama
         message = "Starting Ollama…"
         Task {
-            await runLoginShell("open -a Ollama 2>/dev/null || (nohup ollama serve >/dev/null 2>&1 &)")
+            let output = await runLoginShellCapturing("nohup ollama serve >/dev/null 2>&1 & echo $!")
+            Self.startedServerPID = Int32(output.trimmingCharacters(in: .whitespacesAndNewlines))
             try? await Task.sleep(for: .seconds(2))
             busyProvider = nil
             message = nil
             refresh()
         }
+    }
+
+    /// Stops the `ollama serve` Refman started, if any. Verifies the PID is still
+    /// an ollama process first, so recycled PIDs never take an innocent process
+    /// down. Call from `applicationWillTerminate`.
+    static func stopStartedServer() {
+        guard let pid = startedServerPID else { return }
+        startedServerPID = nil
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-p", "\(pid)", "-o", "command="]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        ps.standardError = FileHandle.nullDevice
+        guard (try? ps.run()) != nil else { return }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        ps.waitUntilExit()
+        if String(decoding: data, as: UTF8.self).contains("ollama") { kill(pid, SIGTERM) }
     }
 
     /// Pulls an Ollama model via the streaming pull API so progress can be shown,
@@ -227,10 +251,12 @@ final class ProviderSetupModel: ObservableObject {
     private func run(_ p: LLMProvider, message: String, shell command: String) {
         busyProvider = p
         self.message = message
+        installFraction = nil
         Task {
-            await runLoginShell(command)
+            await runLoginShellStreaming(command)
             busyProvider = nil
             self.message = nil
+            installFraction = nil
             refresh()
         }
     }
@@ -249,6 +275,74 @@ final class ProviderSetupModel: ObservableObject {
                 cont.resume()
             }
         }
+    }
+
+    /// Like `runLoginShell`, but returns the command's stdout (used to read the
+    /// backgrounded server's PID via `echo $!`).
+    private func runLoginShellCapturing(_ command: String) async -> String {
+        await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
+            DispatchQueue.global().async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                process.arguments = ["-lc", command]
+                process.standardInput = FileHandle.nullDevice
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = FileHandle.nullDevice
+                try? process.run()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                cont.resume(returning: String(decoding: data, as: UTF8.self))
+            }
+        }
+    }
+
+    /// Like `runLoginShell`, but streams the command's output and drives
+    /// `installFraction` from any percentage an installer prints (e.g. curl's
+    /// `--progress-bar`). Falls back to no fraction when none is emitted.
+    private func runLoginShellStreaming(_ command: String) async {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", command]
+        process.standardInput = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        guard (try? process.run()) != nil else { return }
+        // Progress bars update in place with carriage returns, so split on both.
+        var line = ""
+        do {
+            for try await byte in pipe.fileHandleForReading.bytes {
+                if byte == 0x0A || byte == 0x0D {
+                    consumeProgress(line)
+                    line = ""
+                } else {
+                    line.unicodeScalars.append(UnicodeScalar(byte))
+                }
+            }
+        } catch {}
+        process.waitUntilExit()
+    }
+
+    /// Updates `installFraction` from the last percentage found in `line`.
+    private func consumeProgress(_ line: String) {
+        if let percent = Self.lastPercent(in: line) { installFraction = percent / 100 }
+    }
+
+    /// The `NN` / `NN.N` value immediately before the last `%` in a line,
+    /// clamped to 0...100. Matches curl's `--progress-bar` output.
+    static func lastPercent(in line: String) -> Double? {
+        guard let percentIndex = line.lastIndex(of: "%") else { return nil }
+        var digits = ""
+        var index = percentIndex
+        while index > line.startIndex {
+            index = line.index(before: index)
+            let character = line[index]
+            guard character.isNumber || character == "." else { break }
+            digits.insert(character, at: digits.startIndex)
+        }
+        guard let value = Double(digits) else { return nil }
+        return min(max(value, 0), 100)
     }
 
 }
@@ -273,7 +367,14 @@ struct ProviderSetupView: View {
                     badge("Running", ok: setup.ollamaRunning ?? false)
                 }
                 Spacer()
-                if busy { ProgressView().controlSize(.small) }
+                if busy, setup.installFraction == nil { ProgressView().controlSize(.small) }
+            }
+            if busy, let fraction = setup.installFraction {
+                ProgressView(value: fraction) {
+                    Text(fraction, format: .percent.precision(.fractionLength(0)))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack {
                 if !status.installed {
