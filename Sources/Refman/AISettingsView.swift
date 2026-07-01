@@ -17,6 +17,9 @@ struct AISettingsView: View {
 
     @State private var showAdvanced = false
 
+    /// A curated local model offered for one-click install.
+    private let suggestedModel = "gemma4:12b-mlx"
+
     var body: some View {
         Form {
             // Provider and model choice only apply to the bundled agent.
@@ -84,8 +87,15 @@ struct AISettingsView: View {
                             Picker("Model", selection: $ollamaModel) {
                                 Text("Largest installed (auto)").tag("")
                                 ForEach(modelList.models, id: \.self) { name in
-                                    Text(name).tag(name)
+                                    Text(name == suggestedModel ? "\(name) (suggested)" : name)
+                                        .tag(name)
                                 }
+                            }
+                        }
+                        if !modelList.models.contains(suggestedModel) {
+                            SuggestedModelRow(name: suggestedModel, setup: providerSetup) {
+                                modelList.load()
+                                ollamaModel = suggestedModel
                             }
                         }
                     }
@@ -132,6 +142,51 @@ struct AISettingsView: View {
             Button("") { NSApp.keyWindow?.close() }
                 .keyboardShortcut(.cancelAction)
                 .hidden()
+        }
+    }
+}
+
+/// A one-click install row for a suggested Ollama model, shown when that model
+/// isn't already installed. Runs `ollama pull` and selects it when done.
+struct SuggestedModelRow: View {
+    let name: String
+    @ObservedObject var setup: ProviderSetupModel
+    let onInstalled: @MainActor () -> Void
+
+    var body: some View {
+        let pulling = setup.pullingModel == name
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Suggested: \(name)")
+                    Text("Download this local model to get started.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !pulling {
+                    Button("Install", systemImage: "arrow.down.circle") {
+                        setup.pullOllamaModel(name, then: onInstalled)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            if pulling {
+                if let fraction = setup.pullFraction {
+                    ProgressView(value: fraction) {
+                        Text(fraction, format: .percent.precision(.fractionLength(0)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+                if let status = setup.pullStatus {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 }

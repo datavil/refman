@@ -24,12 +24,16 @@ enum LLMProvider: String, CaseIterable, Identifiable {
         }
     }
 
-    enum Install { case script(String), openURL(URL) }
+    enum Install { case script(String) }
     enum SignIn { case browserCLI(String), none }
 
     var install: Install {
         switch self {
-        case .ollama: return .openURL(URL(string: "https://ollama.com/download")!)
+        case .ollama:
+            return .script(
+                "curl -fsSL https://ollama.com/download/Ollama-darwin.zip -o /tmp/Ollama-darwin.zip"
+                    + " && ditto -x -k /tmp/Ollama-darwin.zip /Applications"
+                    + " && rm -f /tmp/Ollama-darwin.zip && open -a Ollama")
         case .openai: return .script("curl -fsSL https://chatgpt.com/codex/install.sh | sh")
         case .claude: return .script("curl -fsSL https://claude.ai/install.sh | bash")
         }
@@ -71,6 +75,11 @@ final class ProviderSetupModel: ObservableObject {
     /// Whether the local Ollama server answered; nil while unknown/checking.
     @Published private(set) var ollamaRunning: Bool?
     @Published var message: String?
+    /// The model currently being pulled, plus its progress (nil fraction while
+    /// the size is still unknown, e.g. during "pulling manifest").
+    @Published private(set) var pullingModel: String?
+    @Published private(set) var pullFraction: Double?
+    @Published private(set) var pullStatus: String?
 
     private var ollamaHost: String {
         ProcessInfo.processInfo.environment["REFMAN_OLLAMA_HOST"] ?? "http://127.0.0.1:11434"
@@ -129,11 +138,69 @@ final class ProviderSetupModel: ObservableObject {
         }
     }
 
+    /// Pulls an Ollama model via the streaming pull API so progress can be shown,
+    /// then runs `onDone` so the caller can reload the model list and select it.
+    func pullOllamaModel(_ name: String, then onDone: @MainActor @escaping () -> Void = {}) {
+        guard pullingModel == nil else { return }
+        pullingModel = name
+        pullFraction = nil
+        pullStatus = "Starting…"
+        Task {
+            let ok = await streamPull(name)
+            pullingModel = nil
+            pullFraction = nil
+            pullStatus = nil
+            refresh()
+            if ok { onDone() }
+        }
+    }
+
+    /// Streams `POST /api/pull`, updating `pullFraction`/`pullStatus` from each
+    /// newline-delimited JSON event. Returns whether the pull completed cleanly.
+    private func streamPull(_ name: String) async -> Bool {
+        guard let url = URL(string: "\(ollamaHost)/api/pull") else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Send both keys so old and new Ollama servers both accept it.
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["model": name, "name": name])
+        struct Event: Decodable {
+            let status: String?
+            let total: Int64?
+            let completed: Int64?
+            let error: String?
+        }
+        do {
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                pullStatus = "Couldn't reach Ollama — start it above, then try again."
+                return false
+            }
+            for try await line in bytes.lines {
+                guard let data = line.data(using: .utf8),
+                    let event = try? JSONDecoder().decode(Event.self, from: data)
+                else { continue }
+                if let error = event.error {
+                    pullStatus = error
+                    return false
+                }
+                if let total = event.total, total > 0, let completed = event.completed {
+                    pullFraction = Double(completed) / Double(total)
+                } else {
+                    pullFraction = nil
+                }
+                if let status = event.status { pullStatus = status }
+            }
+            return true
+        } catch {
+            pullStatus = "Download failed: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func install(_ p: LLMProvider) {
-        switch p.install {
-        case .openURL(let url):
-            NSWorkspace.shared.open(url)
-        case .script(let command):
+        if case .script(let command) = p.install {
             run(p, message: "Installing \(p.title)…", shell: command)
         }
     }
@@ -210,7 +277,7 @@ struct ProviderSetupView: View {
             }
             HStack {
                 if !status.installed {
-                    Button(provider == .ollama ? "Get Ollama…" : "Install") {
+                    Button("Install") {
                         setup.install(provider)
                     }
                 } else if provider == .ollama {
