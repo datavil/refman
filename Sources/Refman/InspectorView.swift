@@ -60,10 +60,10 @@ struct InspectorView: View {
                 }
             }
 
-            insightSection("Summary", \.summary, action: "Summarize")
-            insightSection("Key Points", \.keyPoints, action: "Key Points")
-            insightSection("Methods", \.methods, action: "Methods")
-            insightSection("Limitations", \.limitations, action: "Limitations")
+            insightSection("Summary", \.summary, insight: .summary, action: "Summarize")
+            insightSection("Key Points", \.keyPoints, insight: .keyPoints, action: "Key Points")
+            insightSection("Methods", \.methods, insight: .methods, action: "Methods")
+            insightSection("Limitations", \.limitations, insight: .limitations, action: "Limitations")
 
             Section("Tags") {
                 if !details.tags.isEmpty {
@@ -105,10 +105,16 @@ struct InspectorView: View {
     /// pointing at the generating command when empty.
     @ViewBuilder
     private func insightSection(
-        _ title: String, _ keyPath: KeyPath<Document, String?>, action: String
+        _ title: String, _ keyPath: KeyPath<Document, String?>,
+        insight: DocumentInsight, action: String
     ) -> some View {
         Section(title) {
-            if let text = draft[keyPath: keyPath]?.trimmingCharacters(in: .whitespaces),
+            if let id = details.document.id, model.isGeneratingInsight(insight, for: id) {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Generating…").foregroundStyle(.secondary)
+                }
+            } else if let text = draft[keyPath: keyPath]?.trimmingCharacters(in: .whitespaces),
                 !text.isEmpty
             {
                 ScrollableMaxHeight(maxHeight: 220) {

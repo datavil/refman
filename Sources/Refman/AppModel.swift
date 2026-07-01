@@ -10,6 +10,7 @@ enum SidebarItem: Hashable {
     case recentlyOpened
     case reading
     case uncategorized
+    case duplicates
     case trash
     case collection(Int64)
     case tag(Int64)
@@ -21,6 +22,13 @@ struct ImportOutcome: Identifiable {
     let id = UUID()
     let name: String
     let status: Status
+}
+
+/// A single in-flight AI insight generation, keyed so the inspector can show a
+/// spinner on the right section until it finishes.
+struct InsightJob: Hashable {
+    let documentId: Int64
+    let insight: DocumentInsight
 }
 
 struct LibraryStats {
@@ -60,6 +68,10 @@ final class AppModel: ObservableObject {
     }
 
     @Published var documents: [DocumentDetails] = []
+    /// Groups of live references sharing a DOI/arXiv ID, for the Duplicates view.
+    @Published var duplicateGroups: [[DocumentDetails]] = []
+    /// AI insight generations currently running, so the UI can show a spinner.
+    @Published var generatingInsights: Set<InsightJob> = []
     @Published var collections: [RefmanCore.Collection] = []
     @Published var tags: [Tag] = []
     @Published var sidebarSelection: SidebarItem = .all
@@ -152,6 +164,9 @@ final class AppModel: ObservableObject {
                     documents = try repository.readingDocuments()
                 case .uncategorized:
                     documents = try repository.uncategorizedDocuments()
+                case .duplicates:
+                    duplicateGroups = try repository.duplicateGroups()
+                    documents = duplicateGroups.flatMap { $0 }
                 case .trash:
                     documents = try repository.trashedDocuments()
                 case .collection(let id):
@@ -192,7 +207,11 @@ final class AppModel: ObservableObject {
                     case .imported:
                         log.append(.init(name: name, status: .imported))
                     case .duplicate:
-                        log.append(.init(name: name, status: .duplicate))
+                        // Keep every dropped PDF: a byte-identical file becomes a
+                        // separate record rather than being skipped. Same-paper
+                        // dupes surface in the Duplicates view for cleanup.
+                        _ = try await pipeline.importPDFAsNew(at: url)
+                        log.append(.init(name: name, status: .imported))
                     case .inTrash(let existing, let sourceURL):
                         switch promptTrashConflict(name: name, existing: existing) {
                         case .restore:
@@ -269,6 +288,22 @@ final class AppModel: ObservableObject {
             } catch {
                 statusMessage = "Add failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    /// Attaches a local PDF file the user picks to an existing reference.
+    func attachPDF(id: Int64) {
+        guard let details = documents.first(where: { $0.document.id == id }) else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            _ = try pipeline.attachPDF(at: url, to: details.document)
+            statusMessage = "PDF attached"
+            reload()
+        } catch {
+            statusMessage = "Attach failed: \(error.localizedDescription)"
         }
     }
 
@@ -556,8 +591,11 @@ final class AppModel: ObservableObject {
             let action = AssistantPrompts.document.first(where: { $0.saves == insight })
         else { return }
         let title = details.document.title
+        let job = InsightJob(documentId: id, insight: insight)
+        generatingInsights.insert(job)
         statusMessage = "Generating \(action.label.lowercased()) for “\(title)”…"
         Task {
+            defer { generatingInsights.remove(job) }
             do {
                 let text = try await AssistantModel.generateText(
                     prompt: action.prompt, documentId: id, repository: repository)
@@ -572,6 +610,11 @@ final class AppModel: ObservableObject {
                 statusMessage = "\(action.label) failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// True while the given insight is being generated for a document.
+    func isGeneratingInsight(_ insight: DocumentInsight, for id: Int64) -> Bool {
+        generatingInsights.contains(InsightJob(documentId: id, insight: insight))
     }
 
     func update(_ document: Document, authors: [Author]? = nil) {

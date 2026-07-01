@@ -107,7 +107,11 @@ public final class ACPClient: @unchecked Sendable {
                 "protocolVersion": 1,
                 "clientCapabilities": ["fs": ["readTextFile": false, "writeTextFile": false]],
             ])
-        let session = try await peer.request("session/new", params: ["cwd": NSHomeDirectory(), "mcpServers": []])
+        // Neutral, non-git working directory: the home folder (or any repo) makes
+        // the agent probe for git, which pops the macOS "install developer tools"
+        // dialog on Macs without Command Line Tools installed.
+        let cwd = FileManager.default.temporaryDirectory.path
+        let session = try await peer.request("session/new", params: ["cwd": cwd, "mcpServers": []])
         sessionId = (session as? [String: Any])?["sessionId"] as? String
     }
 

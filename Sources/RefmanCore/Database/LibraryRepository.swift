@@ -136,9 +136,39 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    /// A *live* (non-trashed) document with this DOI, if any. Trashed rows are
+    /// ignored so a paper in the Trash doesn't block re-adding it by DOI.
     public func document(doi: String) throws -> Document? {
         try dbWriter.read { db in
-            try Document.filter(Column("doi") == doi).fetchOne(db)
+            try Document
+                .filter(Column("doi") == doi && Column("deletedAt") == nil)
+                .fetchOne(db)
+        }
+    }
+
+    /// A live reference for the same paper (matched by DOI or arXiv ID) that has
+    /// no PDF yet — the target for auto-attaching an imported PDF.
+    public func liveDocumentNeedingPDF(doi: String?, arxivId: String?) throws -> Document? {
+        guard let match = Self.paperMatch(doi: doi, arxivId: arxivId) else { return nil }
+        return try dbWriter.read { db in
+            try Document
+                .filter(Column("deletedAt") == nil && Column("fileHash") == nil && match)
+                .fetchOne(db)
+        }
+    }
+
+    /// Permanently removes trashed, PDF-less references for the same paper. Used
+    /// when importing a PDF for a paper whose metadata-only copy was trashed.
+    public func purgeTrashedWithoutPDF(doi: String?, arxivId: String?) throws {
+        guard let match = Self.paperMatch(doi: doi, arxivId: arxivId) else { return }
+        try dbWriter.write { db in
+            let ids = try Document
+                .filter(Column("deletedAt") != nil && Column("fileHash") == nil && match)
+                .fetchAll(db).compactMap(\.id)
+            for id in ids {
+                try db.execute(sql: "DELETE FROM documentFTS WHERE rowid = ?", arguments: [id])
+            }
+            try Document.deleteAll(db, keys: ids)
         }
     }
 
@@ -252,6 +282,31 @@ public final class LibraryRepository: Sendable {
                 )
             }
         }
+    }
+
+    /// Live documents that share a strong identifier (DOI, arXiv ID, or identical
+    /// PDF bytes), grouped so the user can resolve duplicates. Each returned group
+    /// has 2+ members; groups are ordered by the first member's title.
+    public func duplicateGroups() throws -> [[DocumentDetails]] {
+        let live = try allDocuments()
+        var byKey: [String: [DocumentDetails]] = [:]
+        for details in live {
+            let doc = details.document
+            let key: String?
+            if let doi = doc.doi?.lowercased(), !doi.isEmpty {
+                key = "doi:\(doi)"
+            } else if let arxiv = doc.arxivId?.lowercased(), !arxiv.isEmpty {
+                key = "arxiv:\(arxiv)"
+            } else if let hash = doc.fileHash, !hash.isEmpty {
+                key = "hash:\(hash)"
+            } else {
+                key = nil
+            }
+            if let key { byKey[key, default: []].append(details) }
+        }
+        return byKey.values
+            .filter { $0.count > 1 }
+            .sorted { $0[0].document.title.localizedStandardCompare($1[0].document.title) == .orderedAscending }
     }
 
     /// Documents that belong to no collection, newest first.
@@ -544,6 +599,16 @@ public final class LibraryRepository: Sendable {
     }
 
     // MARK: - Internals
+
+    /// Matches a document to a paper by DOI or arXiv ID (OR of whichever are
+    /// present). Nil when neither identifier is given.
+    private static func paperMatch(doi: String?, arxivId: String?) -> SQLExpression? {
+        var terms: [SQLExpression] = []
+        if let doi { terms.append(Column("doi") == doi) }
+        if let arxivId { terms.append(Column("arxivId") == arxivId) }
+        guard let first = terms.first else { return nil }
+        return terms.dropFirst().reduce(first) { $0 || $1 }
+    }
 
     private static func setAuthors(
         _ db: Database, documentId: Int64, authors: [Author]

@@ -72,8 +72,14 @@ struct LibraryView: View {
                 // Fixed width: the sidebar is unresizable but can be toggled.
                 .navigationSplitViewColumnWidth(LayoutReset.sidebarWidth)
         } content: {
-            documentTable
-                .navigationSplitViewColumnWidth(min: 400, ideal: 560)
+            Group {
+                if model.sidebarSelection == .duplicates {
+                    DuplicatesView()
+                } else {
+                    documentTable
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 400, ideal: 560)
         } detail: {
             Group {
                 if model.selectedDocumentIds.count > 1 {
@@ -222,6 +228,8 @@ struct LibraryView: View {
                     .tag(SidebarItem.recent)
                 Label("Uncategorized", systemImage: "tray")
                     .tag(SidebarItem.uncategorized)
+                Label("Duplicates", systemImage: "square.on.square")
+                    .tag(SidebarItem.duplicates)
                 Label("Trash", systemImage: "trash")
                     .tag(SidebarItem.trash)
             }
@@ -471,6 +479,7 @@ struct LibraryView: View {
                 if ids.count == 1, let id = ids.first {
                     Button("Open PDF") { openReader(id) }
                     Button("Quick Look") { quickLook(id) }
+                    Button("Attach PDF…") { model.attachPDF(id: id) }
                     Button("Fetch PDF") { model.fetchPDF(id: id) }
                     Button("Refresh Metadata") { model.refreshMetadata(id: id) }
                     Divider()

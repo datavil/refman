@@ -223,6 +223,55 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v11") { db in
+            // Drop the UNIQUE constraint on document.doi: a paper may legitimately
+            // exist more than once (a fresh import alongside a trashed copy, or a
+            // second attached PDF). Dedup now happens in code, scoped to live rows.
+            // SQLite can't drop a column constraint in place, so recreate the table.
+            try db.create(table: "document_new") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("uuid", .text).notNull().unique()
+                t.column("type", .text).notNull().defaults(to: "article")
+                t.column("title", .text).notNull().defaults(to: "")
+                t.column("abstract", .text)
+                t.column("year", .integer)
+                t.column("venue", .text)
+                t.column("volume", .text)
+                t.column("issue", .text)
+                t.column("pages", .text)
+                t.column("doi", .text)
+                t.column("arxivId", .text)
+                t.column("url", .text)
+                t.column("fileHash", .text)
+                t.column("fileName", .text)
+                t.column("addedAt", .datetime).notNull()
+                t.column("modifiedAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+                t.column("openedAt", .datetime)
+                t.column("isReading", .boolean).notNull().defaults(to: false)
+                t.column("summary", .text)
+                t.column("keyPoints", .text)
+                t.column("methods", .text)
+                t.column("limitations", .text)
+            }
+            try db.execute(
+                sql: """
+                    INSERT INTO document_new (
+                        id, uuid, type, title, abstract, year, venue, volume, issue,
+                        pages, doi, arxivId, url, fileHash, fileName, addedAt,
+                        modifiedAt, deletedAt, openedAt, isReading, summary, keyPoints,
+                        methods, limitations)
+                    SELECT
+                        id, uuid, type, title, abstract, year, venue, volume, issue,
+                        pages, doi, arxivId, url, fileHash, fileName, addedAt,
+                        modifiedAt, deletedAt, openedAt, isReading, summary, keyPoints,
+                        methods, limitations
+                    FROM document
+                    """)
+            try db.drop(table: "document")
+            try db.rename(table: "document_new", to: "document")
+        }
+
         return migrator
     }
 }

@@ -188,11 +188,38 @@ import Testing
         #expect(try repo.colorLabels(documentId: a.id).isEmpty)  // empty label removes
     }
 
-    @Test func duplicateDOIRejected() throws {
+    @Test func duplicateDOIsCoexistButLookupIsLiveScoped() throws {
         let repo = try makeRepo()
-        try repo.insert(Document(title: "One", doi: "10.1/x"))
-        #expect(throws: Error.self) {
-            try repo.insert(Document(title: "Two", doi: "10.1/x"))
-        }
+        // Two rows may share a DOI (dedup happens in code, not the schema).
+        let a = try repo.insert(Document(title: "One", doi: "10.1/x"))
+        try repo.insert(Document(title: "Two", doi: "10.1/x"))
+
+        // A live lookup finds one of them; trashing it makes the DOI free again.
+        #expect(try repo.document(doi: "10.1/x") != nil)
+        try repo.delete(documentId: a.id)
+        #expect(try repo.document(doi: "10.1/x")?.id != a.id)
+    }
+
+    @Test func liveDocumentNeedingPDFTargetsPDFlessLiveRow() throws {
+        let repo = try makeRepo()
+        let meta = try repo.insert(Document(title: "Meta only", doi: "10.1/x"))
+        #expect(try repo.liveDocumentNeedingPDF(doi: "10.1/x", arxivId: nil)?.id == meta.id)
+
+        // Once it has a PDF, it's no longer an attach target.
+        var withPDF = meta.document
+        withPDF.fileHash = "hash"
+        try repo.update(withPDF)
+        #expect(try repo.liveDocumentNeedingPDF(doi: "10.1/x", arxivId: nil) == nil)
+    }
+
+    @Test func purgeTrashedWithoutPDFRemovesOnlyTrashedMetadataCopies() throws {
+        let repo = try makeRepo()
+        let trashed = try repo.insert(Document(title: "Trashed", doi: "10.1/x"))
+        try repo.delete(documentId: trashed.id)
+        let live = try repo.insert(Document(title: "Live", doi: "10.1/x"))
+
+        try repo.purgeTrashedWithoutPDF(doi: "10.1/x", arxivId: nil)
+        #expect(try repo.document(id: trashed.id) == nil)
+        #expect(try repo.document(id: live.id) != nil)
     }
 }

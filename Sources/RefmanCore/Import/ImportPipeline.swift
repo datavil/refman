@@ -78,20 +78,38 @@ public struct ImportPipeline: Sendable {
     private func ingest(hash: String, url: URL) async throws -> Result {
         let extracted = PDFTextExtractor.extract(from: store.url(forHash: hash))
         let head = extracted?.headText ?? ""
-        let doi = IdentifierScanner.firstDOI(in: head)
-        let arxivId = IdentifierScanner.firstArxivID(in: head)
+        let scannedDOI = IdentifierScanner.firstDOI(in: head)
+        let scannedArxiv = IdentifierScanner.firstArxivID(in: head)
 
         // Resolve online; failures are non-fatal.
         var record: MetadataRecord?
         var resolvedOnline = false
-        if let doi {
-            record = try? await crossRef.resolve(doi: doi)
+        if let scannedDOI {
+            record = try? await crossRef.resolve(doi: scannedDOI)
             resolvedOnline = record != nil
         }
-        if record == nil, let arxivId {
-            record = try? await arXiv.resolve(arxivId: arxivId)
+        if record == nil, let scannedArxiv {
+            record = try? await arXiv.resolve(arxivId: scannedArxiv)
             resolvedOnline = record != nil
         }
+
+        let doi = record?.doi ?? scannedDOI
+        let arxivId = record?.arxivId ?? scannedArxiv
+
+        // Same paper already in the library without a PDF (e.g. added by DOI)?
+        // Attach the file to it rather than creating a duplicate row.
+        if let existing = try repository.liveDocumentNeedingPDF(doi: doi, arxivId: arxivId) {
+            var updated = existing
+            record?.apply(to: &updated)
+            updated.fileHash = hash
+            updated.fileName = url.lastPathComponent
+            let details = try repository.update(
+                updated, authors: record?.authorRecords, fullText: extracted?.fullText)
+            return Result(details: details, wasDuplicate: false, resolvedOnline: resolvedOnline)
+        }
+
+        // A metadata-only copy sitting in the Trash is superseded by this import.
+        try repository.purgeTrashedWithoutPDF(doi: doi, arxivId: arxivId)
 
         var document = Document(
             title: extracted?.embeddedTitle ?? url.deletingPathExtension().lastPathComponent,
@@ -145,6 +163,17 @@ public struct ImportPipeline: Sendable {
         let details = try repository.insert(
             document, authors: record.authorRecords, fullText: fullText)
         return .added(details)
+    }
+
+    /// Attaches a user-picked local PDF to an existing reference, storing its
+    /// bytes and indexing its extracted text.
+    public func attachPDF(at url: URL, to document: Document) throws -> DocumentDetails {
+        let hash = try store.ingest(fileAt: url)
+        var updated = document
+        updated.fileHash = hash
+        updated.fileName = url.lastPathComponent
+        let fullText = PDFTextExtractor.extract(from: store.url(forHash: hash))?.fullText
+        return try repository.update(updated, fullText: fullText)
     }
 
     /// Downloads and attaches an open-access PDF to an existing document.
