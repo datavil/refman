@@ -48,7 +48,7 @@ all tests pass.
 **Manual acceptance:** Launch Refman, import/select/open a paper, open Settings,
 and use the assistant panel without regressions.
 
-### 3. [ ] Add application and assistant contract tests
+### 3. [x] Add application and assistant contract tests
 
 **Deliverable:** Testable app-state operations for search, import outcomes,
 trash/restore, and assistant tool requests. Split only the seams required for

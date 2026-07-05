@@ -39,5 +39,13 @@ let package = Package(
             resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .testTarget(
+            name: "RefmanTests",
+            dependencies: ["Refman", "RefmanCore"],
+            swiftSettings: [
+                .defaultIsolation(MainActor.self),
+                .swiftLanguageMode(.v6),
+            ]
+        ),
     ]
 )

@@ -263,15 +263,21 @@ final class AppModel {
             isImporting = false
             importProgress = nil
             importLog = log
-            let imported = log.filter { $0.status == .imported }.count
-            let duplicates = log.filter { $0.status == .duplicate }.count
-            let failures = log.filter { $0.status == .failed }.count
-            var parts = ["Imported \(imported)"]
-            if duplicates > 0 { parts.append("\(duplicates) duplicate\(duplicates == 1 ? "" : "s") skipped") }
-            if failures > 0 { parts.append("\(failures) failed") }
-            statusMessage = parts.joined(separator: ", ")
+            statusMessage = Self.importSummary(for: log)
             reload()
         }
+    }
+
+    static func importSummary(for outcomes: [ImportOutcome]) -> String {
+        let imported = outcomes.filter { $0.status == .imported }.count
+        let duplicates = outcomes.filter { $0.status == .duplicate }.count
+        let failures = outcomes.filter { $0.status == .failed }.count
+        var parts = ["Imported \(imported)"]
+        if duplicates > 0 {
+            parts.append("\(duplicates) duplicate\(duplicates == 1 ? "" : "s") skipped")
+        }
+        if failures > 0 { parts.append("\(failures) failed") }
+        return parts.joined(separator: ", ")
     }
 
     private enum TrashConflictChoice { case restore, replace, skip }

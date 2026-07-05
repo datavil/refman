@@ -57,7 +57,7 @@ pulls the latest GitHub release and relaunches, no quarantine step needed.
 ## Test
 
 ```sh
-swift test                      # 74 unit/integration tests
+swift test                      # 79 unit/integration tests
 python3 scripts/acp_smoke.py    # end-to-end ACP agent test (needs Ollama)
 ```
 
