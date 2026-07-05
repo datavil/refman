@@ -1,5 +1,5 @@
 import Foundation
-import GRDB
+@preconcurrency import GRDB
 
 /// Owns the SQLite connection and schema migrations.
 public final class AppDatabase: Sendable {

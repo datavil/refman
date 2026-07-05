@@ -4,7 +4,7 @@ import SwiftUI
 /// Mendeley-style duplicate resolver: live references that share a DOI or arXiv
 /// ID, grouped so the user can keep one copy and trash the rest.
 struct DuplicatesView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         Group {
@@ -26,7 +26,7 @@ struct DuplicatesView: View {
 
 /// One set of references for the same paper.
 private struct DuplicateGroupSection: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let group: [DocumentDetails]
 
     var body: some View {
@@ -49,7 +49,7 @@ private struct DuplicateGroupSection: View {
 }
 
 private struct DuplicateRow: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let details: DocumentDetails
     let keep: () -> Void
     let remove: () -> Void

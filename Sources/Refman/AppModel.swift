@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Observation
 import RefmanCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -52,7 +53,8 @@ enum ExportFormat {
 }
 
 @MainActor
-final class AppModel: ObservableObject {
+@Observable
+final class AppModel {
     let repository: LibraryRepository
     let store: LibraryStore
     let updater = Updater()
@@ -67,17 +69,17 @@ final class AppModel: ObservableObject {
             pdfFetcher: PDFFetcher(mailto: email))
     }
 
-    @Published var documents: [DocumentDetails] = []
+    var documents: [DocumentDetails] = []
     /// Groups of live references sharing a DOI/arXiv ID, for the Duplicates view.
-    @Published var duplicateGroups: [[DocumentDetails]] = []
+    var duplicateGroups: [[DocumentDetails]] = []
     /// AI insight generations currently running, so the UI can show a spinner.
-    @Published var generatingInsights: Set<InsightJob> = []
+    var generatingInsights: Set<InsightJob> = []
     /// Collection ids whose summary is currently being generated.
-    @Published var generatingCollectionSummaries: Set<Int64> = []
-    @Published var collections: [RefmanCore.Collection] = []
-    @Published var tags: [Tag] = []
-    @Published var sidebarSelection: SidebarItem = .all
-    @Published var selectedDocumentIds: Set<Int64> = []
+    var generatingCollectionSummaries: Set<Int64> = []
+    var collections: [RefmanCore.Collection] = []
+    var tags: [Tag] = []
+    var sidebarSelection: SidebarItem = .all
+    var selectedDocumentIds: Set<Int64> = []
 
     /// Single-selection convenience derived from `selectedDocumentIds`.
     /// `nil` when zero or multiple rows are selected.
@@ -85,17 +87,17 @@ final class AppModel: ObservableObject {
         get { selectedDocumentIds.count == 1 ? selectedDocumentIds.first : nil }
         set { selectedDocumentIds = newValue.map { [$0] } ?? [] }
     }
-    @Published var searchText: String = ""
-    @Published var statusMessage: String?
-    @Published var isImporting = false
-    @Published var importProgress: (done: Int, total: Int)?
-    @Published var importLog: [ImportOutcome] = []
+    var searchText: String = ""
+    var statusMessage: String?
+    var isImporting = false
+    var importProgress: (done: Int, total: Int)?
+    var importLog: [ImportOutcome] = []
 
     /// Incremented to ask the UI to surface the add-reference popover / command palette.
-    @Published var addRequested = 0
-    @Published var paletteRequested = 0
-    @Published var aiSettingsRequested = 0
-    @Published var settingsRequested = 0
+    var addRequested = 0
+    var paletteRequested = 0
+    var aiSettingsRequested = 0
+    var settingsRequested = 0
 
     init(repository: LibraryRepository, store: LibraryStore) {
         self.repository = repository

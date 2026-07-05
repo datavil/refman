@@ -1,14 +1,15 @@
 import CoreImage
+import Observation
 import PDFKit
 import RefmanCore
 import SwiftUI
 
 /// PDF reading window: viewer, annotation toolbar, annotation sidebar, assistant.
 struct ReaderView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let documentId: Int64
 
-    @StateObject private var reader = ReaderModel()
+    @State private var reader = ReaderModel()
     @State private var showAnnotations = false
     @State private var showAssistant = false
     @State private var pendingQuote: String?
@@ -328,41 +329,42 @@ struct OutlineItem: Identifiable {
 
 /// Owns the PDFDocument, mirrors annotations to the repository, persists the PDF.
 @MainActor
-final class ReaderModel: ObservableObject {
-    @Published var annotations: [RefmanCore.Annotation] = []
-    @Published var hasSelection = false
-    @Published var title = "Reader"
+@Observable
+final class ReaderModel {
+    var annotations: [RefmanCore.Annotation] = []
+    var hasSelection = false
+    var title = "Reader"
     /// Selection bounds in the PDFView's SwiftUI (top-left) coordinates,
     /// for positioning the floating annotation pen.
-    @Published var selectionRect: CGRect?
+    var selectionRect: CGRect?
     /// Set when the user hits “Ask AI” on a selection.
-    @Published var askAIRequest: String?
+    var askAIRequest: String?
     /// Set when a sidebar note triggers a built-in AI action (summarize/explain).
-    @Published var aiActionRequest: AssistantAction?
+    var aiActionRequest: AssistantAction?
     /// Annotation the user clicked in the PDF, with its view-space rect,
     /// for the floating remove button.
-    @Published var clickedAnnotation: RefmanCore.Annotation?
-    @Published var clickedAnnotationRect: CGRect?
+    var clickedAnnotation: RefmanCore.Annotation?
+    var clickedAnnotationRect: CGRect?
     /// Index of the page currently in view, for the sidebar's follow-page mode.
-    @Published var currentPageIndex = 0
+    var currentPageIndex = 0
     /// Per-document display names for annotation colors, keyed by hex.
-    @Published var colorLabels: [String: String] = [:]
+    var colorLabels: [String: String] = [:]
     /// When on, finishing a text selection immediately applies a highlight.
-    @Published var highlighterMode = false
-    @Published var highlighterColorHex = AnnotationOptions.colors[0].hex
+    var highlighterMode = false
+    var highlighterColorHex = AnnotationOptions.colors[0].hex
     /// Whether there's a markup action that Cmd+Z / Cmd+Shift+Z can act on.
-    @Published private(set) var canUndo = false
-    @Published private(set) var canRedo = false
+    private(set) var canUndo = false
+    private(set) var canRedo = false
     /// Document's table of contents, flattened; empty when the PDF has none.
-    @Published private(set) var outline: [OutlineItem] = []
+    private(set) var outline: [OutlineItem] = []
     /// In-document search state.
-    @Published var searchText = ""
-    @Published private(set) var searchMatches: [PDFSelection] = []
-    @Published private(set) var searchActiveIndex = 0
+    var searchText = ""
+    private(set) var searchMatches: [PDFSelection] = []
+    private(set) var searchActiveIndex = 0
     /// Reading comfort tint applied to the page; re-applied on change.
-    @Published var readingMode: ReadingMode = .off { didSet { applyReadingMode() } }
+    var readingMode: ReadingMode = .off { didSet { applyReadingMode() } }
     /// Single-page vs two-up continuous layout.
-    @Published var twoUp = false {
+    var twoUp = false {
         didSet { pdfView?.displayMode = twoUp ? .twoUpContinuous : .singlePageContinuous }
     }
 
@@ -391,9 +393,9 @@ final class ReaderModel: ObservableObject {
     private var model: AppModel?
     weak var pdfView: PDFView?
 
-    /// Serializes the (expensive) full-PDF writes off the main thread.
-    private static let saveQueue = DispatchQueue(label: "com.refman.pdfsave", qos: .utility)
-    private var pendingSave: DispatchWorkItem?
+    /// Serializes full-PDF writes off the main actor.
+    private static let saveCoordinator = PDFSaveCoordinator()
+    private var pendingSave: Task<Void, Never>?
 
     /// PDFKit drops the standard `.name` (/NM) key when writing the file,
     /// so annotations are tagged with a custom key that does survive a round trip.
@@ -971,26 +973,30 @@ final class ReaderModel: ObservableObject {
         }
     }
 
-    /// Writes the PDF off the main thread, coalescing edits made in quick
-    /// succession into a single write.
+    /// Coalesces edits made in quick succession into a single PDF snapshot and write.
     private func savePDF() {
-        guard let doc = pdfDocument, let url = fileURL else { return }
         pendingSave?.cancel()
-        // The debounce keeps the document idle while the background write runs.
-        nonisolated(unsafe) let writeDoc = doc
-        let work = DispatchWorkItem { writeDoc.write(to: url) }
-        pendingSave = work
-        Self.saveQueue.asyncAfter(deadline: .now() + 0.4, execute: work)
+        pendingSave = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(400))
+                await self?.writePDF()
+            } catch {
+                // A newer edit replaced this pending save.
+            }
+        }
     }
 
     /// Flush any pending write immediately (e.g. when closing the reader).
     func flushSave() {
-        guard let work = pendingSave, !work.isCancelled else { return }
-        pendingSave = nil
-        work.cancel()
-        guard let doc = pdfDocument, let url = fileURL else { return }
-        nonisolated(unsafe) let writeDoc = doc
-        Self.saveQueue.async { writeDoc.write(to: url) }
+        pendingSave?.cancel()
+        pendingSave = Task { [weak self] in
+            await self?.writePDF()
+        }
+    }
+
+    private func writePDF() async {
+        guard let data = pdfDocument?.dataRepresentation(), let url = fileURL else { return }
+        await Self.saveCoordinator.write(data, to: url)
     }
 }
 
@@ -1076,7 +1082,7 @@ final class MarkupClickPDFView: PDFView {
 
 /// NSViewRepresentable wrapper around PDFView.
 struct PDFKitView: NSViewRepresentable {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     @AppStorage(SettingsKeys.highlightOpacity) private var highlightOpacity = 1.0
 
     func makeNSView(context: Context) -> PDFView {
@@ -1158,7 +1164,7 @@ struct PDFKitView: NSViewRepresentable {
 
 /// Toolbar in-document search: live match count with prev/next navigation.
 struct ReaderSearchBar: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     @FocusState.Binding var focused: Bool
 
     var body: some View {
@@ -1195,7 +1201,10 @@ struct ReaderSearchBar: View {
         .onChange(of: reader.searchText) { reader.runSearch() }
         .onAppear {
             // Defer a tick: the field isn't in the responder chain yet on appear.
-            DispatchQueue.main.async { focused = true }
+            Task { @MainActor in
+                await Task.yield()
+                focused = true
+            }
         }
     }
 }
@@ -1203,7 +1212,7 @@ struct ReaderSearchBar: View {
 /// Toolbar page-number field with total; jumps to the typed page on submit and
 /// follows the visible page while scrolling.
 struct PageIndicator: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     @State private var text = ""
     @FocusState private var focused: Bool
 
@@ -1232,7 +1241,7 @@ struct PageIndicator: View {
 /// Floating annotation pen shown next to the current text selection:
 /// highlight colors, underline, note, and Ask AI.
 struct SelectionPen: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     @AppStorage(SettingsKeys.highlightPalette)
     private var highlightPalette = AnnotationOptions.defaultPalette
 
@@ -1322,7 +1331,7 @@ struct SelectionPen: View {
 /// Floating action shown when the user clicks an existing highlight/underline:
 /// recolor swatches, note, and remove.
 struct AnnotationBubble: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     let annotation: RefmanCore.Annotation
     @AppStorage(SettingsKeys.highlightPalette)
     private var highlightPalette = AnnotationOptions.defaultPalette
@@ -1531,7 +1540,8 @@ final class FocusGrabbingTextView: NSTextView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
+            await Task.yield()
             guard let self, let window = self.window else { return }
             // The popover window isn't key yet while it animates in, so AppKit
             // skips starting the caret-blink timer; make it key, take focus, and
@@ -1557,7 +1567,7 @@ final class FocusGrabbingTextView: NSTextView {
 /// Left sidebar: a segmented Outline / Annotations switch when the PDF has a
 /// table of contents, otherwise just the annotations list.
 struct ReaderSidebar: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     @State private var tab = Tab.annotations
 
     enum Tab { case outline, annotations }
@@ -1586,7 +1596,7 @@ struct ReaderSidebar: View {
 
 /// The document's table of contents; click an entry to jump there.
 struct OutlineList: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
 
     var body: some View {
         ScrollView {
@@ -1623,7 +1633,7 @@ struct OutlineList: View {
 
 /// Lists annotations; click to jump, edit note text inline.
 struct AnnotationSidebar: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     @State private var followPage = false
     /// Color hexes to show; empty means no filter.
     @State private var colorFilter: Set<String> = []
@@ -1742,14 +1752,15 @@ struct AnnotationSidebar: View {
             })
         else { return }
         // Defer past the current layout pass so the proxy can find the row.
-        DispatchQueue.main.async {
+        Task { @MainActor in
+            await Task.yield()
             withAnimation { proxy.scrollTo(target.uuid, anchor: .top) }
         }
     }
 }
 
 struct AnnotationRow: View {
-    @ObservedObject var reader: ReaderModel
+    @Bindable var reader: ReaderModel
     let annotation: RefmanCore.Annotation
     @State private var noteText: String
     @State private var editingNote: Bool

@@ -1,5 +1,5 @@
 import Foundation
-import GRDB
+@preconcurrency import GRDB
 
 public enum DocumentType: String, Codable, CaseIterable, Sendable {
     case article, book, chapter, conferencePaper, thesis, report, preprint, webpage, misc

@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import RefmanCore
 import SwiftUI
 
@@ -65,19 +66,20 @@ struct ProviderStatus: Equatable {
 /// Detects provider CLI install/sign-in state and drives install + sign-in,
 /// using each CLI's own browser login and credential storage (no API keys).
 @MainActor
-final class ProviderSetupModel: ObservableObject {
-    @Published private(set) var statuses: [String: ProviderStatus] = [:]
-    @Published private(set) var busyProvider: LLMProvider?
+@Observable
+final class ProviderSetupModel {
+    private(set) var statuses: [String: ProviderStatus] = [:]
+    private(set) var busyProvider: LLMProvider?
     /// Whether the local Ollama server answered; nil while unknown/checking.
-    @Published private(set) var ollamaRunning: Bool?
-    @Published var message: String?
+    private(set) var ollamaRunning: Bool?
+    var message: String?
     /// The model currently being pulled, plus its progress (nil fraction while
     /// the size is still unknown, e.g. during "pulling manifest").
-    @Published private(set) var pullingModel: String?
-    @Published private(set) var pullFraction: Double?
-    @Published private(set) var pullStatus: String?
+    private(set) var pullingModel: String?
+    private(set) var pullFraction: Double?
+    private(set) var pullStatus: String?
     /// Progress (0...1) parsed from an install script's output, nil while unknown.
-    @Published private(set) var installFraction: Double?
+    private(set) var installFraction: Double?
 
     private var ollamaHost: String {
         ProcessInfo.processInfo.environment["REFMAN_OLLAMA_HOST"] ?? "http://127.0.0.1:11434"
@@ -264,37 +266,32 @@ final class ProviderSetupModel: ObservableObject {
     /// Runs `command` in a login shell so the user's real PATH (homebrew, nvm…)
     /// applies, and waits for it to finish.
     private func runLoginShell(_ command: String) async {
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global().async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                process.arguments = ["-lc", command]
-                process.standardInput = FileHandle.nullDevice
-                try? process.run()
-                process.waitUntilExit()
-                cont.resume()
-            }
-        }
+        await Task.detached(priority: .utility) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-lc", command]
+            process.standardInput = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+        }.value
     }
 
     /// Like `runLoginShell`, but returns the command's stdout (used to read the
     /// backgrounded server's PID via `echo $!`).
     private func runLoginShellCapturing(_ command: String) async -> String {
-        await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
-            DispatchQueue.global().async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                process.arguments = ["-lc", command]
-                process.standardInput = FileHandle.nullDevice
-                let pipe = Pipe()
-                process.standardOutput = pipe
-                process.standardError = FileHandle.nullDevice
-                try? process.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                cont.resume(returning: String(decoding: data, as: UTF8.self))
-            }
-        }
+        await Task.detached(priority: .utility) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-lc", command]
+            process.standardInput = FileHandle.nullDevice
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: data, as: UTF8.self)
+        }.value
     }
 
     /// Like `runLoginShell`, but streams the command's output and drives
@@ -351,7 +348,7 @@ final class ProviderSetupModel: ObservableObject {
 /// its Settings section.
 struct ProviderSetupView: View {
     let provider: LLMProvider
-    @ObservedObject var setup: ProviderSetupModel
+    @Bindable var setup: ProviderSetupModel
 
     var body: some View {
         let status = setup.status(provider)

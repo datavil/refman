@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -117,9 +118,10 @@ enum SettingsKeys {
 
 /// Lists models from a local Ollama for the model picker.
 @MainActor
-final class OllamaModelList: ObservableObject {
-    @Published var models: [String] = []
-    @Published var loadFailed = false
+@Observable
+final class OllamaModelList {
+    var models: [String] = []
+    var loadFailed = false
 
     func load() {
         Task {
@@ -145,8 +147,9 @@ final class OllamaModelList: ObservableObject {
 /// Lists Codex's available models from its local cache (`~/.codex/models_cache.json`)
 /// for the model picker — Codex has no list-models command.
 @MainActor
-final class CodexModelList: ObservableObject {
-    @Published var models: [(slug: String, name: String)] = []
+@Observable
+final class CodexModelList {
+    var models: [(slug: String, name: String)] = []
 
     func load() {
         let home = ProcessInfo.processInfo.environment["CODEX_HOME"]
@@ -174,7 +177,7 @@ final class CodexModelList: ObservableObject {
 }
 
 struct SettingsView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
     @AppStorage(SettingsKeys.accentColor) private var accentColor = AppAccent.system.rawValue
     @AppStorage(SettingsKeys.contactEmail) private var contactEmail = ""
@@ -284,7 +287,7 @@ struct AccentColorPicker: View {
 
 /// Library stats, backup/restore, and integrity check.
 struct LibrarySettingsSection: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @State private var stats: LibraryStats?
     @State private var report: IntegrityReport?
     @State private var showingReport = false
@@ -362,7 +365,7 @@ struct LibrarySettingsSection: View {
 
 /// App version and the GitHub-backed update check.
 struct UpdatesSettingsSection: View {
-    @ObservedObject var updater: Updater
+    var updater: Updater
 
     var body: some View {
         Section("Updates") {
@@ -422,7 +425,7 @@ struct RevealInFinderButton: View {
 
 /// Library location and iCloud Drive sync.
 struct ICloudSettingsSection: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @State private var confirmMove: MoveTarget?
 
     enum MoveTarget { case iCloud, local }

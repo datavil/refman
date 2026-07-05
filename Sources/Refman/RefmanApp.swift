@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct RefmanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = AppModel.live()
+    @State private var model = AppModel.live()
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
 
     init() {
@@ -46,7 +46,7 @@ struct RefmanApp: App {
     var body: some Scene {
         WindowGroup("Refman") {
             LibraryView()
-                .environmentObject(model)
+                .environment(model)
                 .frame(minWidth: 1000, minHeight: 620)
                 .preferredColorScheme(colorScheme)
         }
@@ -108,7 +108,7 @@ struct RefmanApp: App {
         WindowGroup("Reader", id: "reader", for: Int64.self) { $documentId in
             if let documentId {
                 ReaderView(documentId: documentId)
-                    .environmentObject(model)
+                    .environment(model)
                     .frame(minWidth: 900, minHeight: 600)
                     .preferredColorScheme(colorScheme)
             }
@@ -116,13 +116,13 @@ struct RefmanApp: App {
 
         Settings {
             SettingsView()
-                .environmentObject(model)
+                .environment(model)
                 .preferredColorScheme(colorScheme)
         }
 
         Window("AI Settings", id: "ai-settings") {
             AISettingsView()
-                .environmentObject(model)
+                .environment(model)
                 .preferredColorScheme(colorScheme)
         }
         .windowResizability(.contentSize)

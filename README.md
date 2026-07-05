@@ -29,7 +29,7 @@
 swift run Refman
 ```
 
-Requirements: macOS 14+, Xcode toolchain. For the assistant: [Ollama](https://ollama.com)
+Requirements: macOS 14+, Swift 6.2+ toolchain. For the assistant: [Ollama](https://ollama.com)
 running locally with at least one tool-capable model pulled (e.g. `ollama pull qwen3:14b`).
 Override with `REFMAN_OLLAMA_MODEL` / `REFMAN_OLLAMA_HOST`.
 
@@ -57,7 +57,7 @@ pulls the latest GitHub release and relaunches, no quarantine step needed.
 ## Test
 
 ```sh
-swift test                      # 26 unit/integration tests
+swift test                      # 74 unit/integration tests
 python3 scripts/acp_smoke.py    # end-to-end ACP agent test (needs Ollama)
 ```
 

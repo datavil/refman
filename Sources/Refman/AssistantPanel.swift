@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import RefmanCore
 import SwiftUI
 
@@ -126,7 +127,7 @@ enum AssistantPrompts {
 }
 
 /// Collects streamed chunks from the agent's reading thread, safely.
-final class ChunkAccumulator: @unchecked Sendable {
+nonisolated final class ChunkAccumulator: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer = ""
 
@@ -145,11 +146,12 @@ final class ChunkAccumulator: @unchecked Sendable {
 
 /// Drives one ACP session against refman-agent, exposing library tools.
 @MainActor
-final class AssistantModel: ObservableObject {
-    @Published var messages: [ChatMessage] = []
-    @Published var input = ""
-    @Published var isBusy = false
-    @Published var started = false
+@Observable
+final class AssistantModel {
+    var messages: [ChatMessage] = []
+    var input = ""
+    var isBusy = false
+    var started = false
 
     /// A built-in action waiting for the agent to become ready.
     private var queued: AssistantAction?
@@ -219,7 +221,7 @@ final class AssistantModel: ObservableObject {
             environment: environment
         ) { name, arguments in
             try await Self.handleTool(
-                name: name, arguments: arguments,
+                name: name, arguments: arguments.values,
                 repository: repository, currentDocumentId: documentId)
         }
         self.client = client
@@ -359,7 +361,7 @@ final class AssistantModel: ObservableObject {
         }
         let client = ACPClient(agentURL: agentURL, environment: environment) { name, arguments in
             try await handleTool(
-                name: name, arguments: arguments,
+                name: name, arguments: arguments.values,
                 repository: repository, currentDocumentId: documentId)
         }
         defer { client.stop() }
@@ -385,7 +387,7 @@ final class AssistantModel: ObservableObject {
 }
 
 struct AssistantPanel: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let documentId: Int64
     /// Passage quoted via “Ask AI” on a PDF selection; shown above the input
     /// and prepended to the next message.
@@ -393,7 +395,7 @@ struct AssistantPanel: View {
     /// Built-in action triggered from a note in the sidebar; auto-sent on arrival.
     @Binding var pendingAction: AssistantAction?
 
-    @StateObject private var assistant: AssistantModelBox = AssistantModelBox()
+    @State private var assistant = AssistantModelBox()
     @State private var showClearConfirm = false
     @AppStorage(SettingsKeys.llmProvider) private var llmProvider = "ollama"
     @AppStorage(SettingsKeys.ollamaModel) private var ollamaModel = ""
@@ -531,7 +533,6 @@ struct AssistantPanel: View {
                 assistant.model = AssistantModel(
                     documentId: documentId, repository: model.repository)
                 assistant.model?.onInsightSaved = { [weak model] in model?.reload() }
-                assistant.bind()
             }
             assistant.model?.startIfNeeded()
             consumePendingAction()
@@ -579,21 +580,10 @@ struct AssistantPanel: View {
 
 /// Holds the AssistantModel (created lazily once we have the environment).
 @MainActor
-final class AssistantModelBox: ObservableObject {
-    var model: AssistantModel? {
-        didSet { bind() }
-    }
-    private var cancellable: Any?
-
-    func bind() {
-        guard let model else { return }
-        cancellable = model.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
-        }
-    }
+@Observable
+final class AssistantModelBox {
+    var model: AssistantModel?
 }
-
-import Combine
 
 struct MessageBubble: View {
     let message: ChatMessage

@@ -7,8 +7,17 @@ import Foundation
 /// extension: agents may call back into the app with `refman/toolCall`
 /// to query the library (search, full text, annotations, tags).
 public final class ACPClient: @unchecked Sendable {
+    /// JSON values are created for one request and treated as immutable after parsing.
+    public struct ToolArguments: @unchecked Sendable {
+        public let values: [String: Any]
+
+        init(_ values: [String: Any]) {
+            self.values = values
+        }
+    }
+
     public typealias ToolHandler =
-        (_ name: String, _ arguments: [String: Any]) async throws -> String
+        @Sendable (_ name: String, _ arguments: ToolArguments) async throws -> String
 
     public enum ACPError: Error, LocalizedError {
         case notStarted
@@ -30,7 +39,7 @@ public final class ACPClient: @unchecked Sendable {
     private var peer: JSONRPCPeer?
     private var sessionId: String?
     private let chunkLock = NSLock()
-    private var onChunk: ((String) -> Void)?
+    private var onChunk: (@Sendable (String) -> Void)?
 
     public init(
         agentURL: URL,
@@ -70,7 +79,7 @@ public final class ACPClient: @unchecked Sendable {
             switch method {
             case "refman/toolCall":
                 let name = params["name"] as? String ?? ""
-                let arguments = params["arguments"] as? [String: Any] ?? [:]
+                let arguments = ToolArguments(params["arguments"] as? [String: Any] ?? [:])
                 let result = try await self.toolHandler(name, arguments)
                 return ["result": result]
             case "session/request_permission":
@@ -117,7 +126,9 @@ public final class ACPClient: @unchecked Sendable {
 
     /// Sends one user turn; `onChunk` receives streamed text. Returns the stop reason.
     @discardableResult
-    public func prompt(_ text: String, onChunk: @escaping (String) -> Void) async throws -> String {
+    public func prompt(
+        _ text: String, onChunk: @escaping @Sendable (String) -> Void
+    ) async throws -> String {
         guard let peer, let sessionId else { throw ACPError.notStarted }
         setChunkHandler(onChunk)
         defer { setChunkHandler(nil) }
@@ -130,7 +141,7 @@ public final class ACPClient: @unchecked Sendable {
         return (result as? [String: Any])?["stopReason"] as? String ?? "end_turn"
     }
 
-    private func setChunkHandler(_ handler: ((String) -> Void)?) {
+    private func setChunkHandler(_ handler: (@Sendable (String) -> Void)?) {
         chunkLock.lock()
         onChunk = handler
         chunkLock.unlock()

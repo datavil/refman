@@ -33,9 +33,9 @@ struct ModelsSettingsView: View {
     @AppStorage(SettingsKeys.claudeModel) private var claudeModel = ""
     @AppStorage(SettingsKeys.openaiModel) private var openaiModel = ""
 
-    @StateObject private var modelList = OllamaModelList()
-    @StateObject private var codexList = CodexModelList()
-    @StateObject private var providerSetup = ProviderSetupModel()
+    @State private var modelList = OllamaModelList()
+    @State private var codexList = CodexModelList()
+    @State private var providerSetup = ProviderSetupModel()
 
     @State private var showAdvanced = false
 
@@ -265,7 +265,7 @@ struct PromptsSettingsView: View {
 /// isn't already installed. Runs `ollama pull` and selects it when done.
 struct SuggestedModelRow: View {
     let name: String
-    @ObservedObject var setup: ProviderSetupModel
+    @Bindable var setup: ProviderSetupModel
     let onInstalled: @MainActor () -> Void
 
     var body: some View {

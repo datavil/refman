@@ -1,11 +1,13 @@
 import AppKit
 import Foundation
+import Observation
 
 /// Checks GitHub Releases for a newer build and, when the app is running from a
 /// proper `.app` bundle, downloads the latest `.zip`, swaps the bundle in place,
 /// and relaunches. Unsigned-app friendly: it strips the quarantine flag itself.
 @MainActor
-final class Updater: ObservableObject {
+@Observable
+final class Updater {
     /// owner/repo on GitHub that publishes the releases.
     private static let repo = "datavil/refman"
 
@@ -29,7 +31,7 @@ final class Updater: ObservableObject {
         }
     }
 
-    @Published private(set) var status: Status = .idle
+    private(set) var status: Status = .idle
 
     /// Version baked into the bundle's Info.plist; "0.0.0" when run unbundled.
     static var currentVersion: String {

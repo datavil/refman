@@ -1,5 +1,5 @@
 import Foundation
-import GRDB
+@preconcurrency import GRDB
 
 /// A document with its authors and tags resolved, for display and export.
 public struct DocumentDetails: Identifiable, Equatable, Hashable, Sendable {

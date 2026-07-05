@@ -36,7 +36,7 @@ and the full build pass.
 collection, and confirm the other collection's paper does not appear. Repeat in
 Trash.
 
-### 2. [ ] Adopt the project's modern Swift baseline
+### 2. [x] Adopt the project's modern Swift baseline
 
 **Deliverable:** Move targets to Swift 6.2 strict concurrency and migrate shared
 UI state from `ObservableObject`/`@Published` to Observation's `@Observable`

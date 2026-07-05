@@ -54,7 +54,7 @@ let systemPrompt = """
 
     """
 
-let toolDefinitions: [[String: Any]] = [
+func makeToolDefinitions() -> [[String: Any]] { [
     [
         "type": "function",
         "function": [
@@ -112,7 +112,7 @@ let toolDefinitions: [[String: Any]] = [
             ],
         ],
     ],
-]
+] }
 
 /// Explicit env override, else the largest model Ollama has installed.
 func resolveModel() async -> String {
@@ -155,7 +155,7 @@ func ollamaChat(
     request.httpBody = try JSONSerialization.data(withJSONObject: [
         "model": model,
         "messages": messages,
-        "tools": toolDefinitions,
+        "tools": makeToolDefinitions(),
         "stream": true,
     ])
 
@@ -248,7 +248,7 @@ func paperContext() -> String? {
 func codexChat(
     binary: String,
     prompt: String,
-    onText: @escaping (String) -> Void
+    onText: @escaping @Sendable (String) -> Void
 ) async throws {
     var args = ["exec", "--json", "--skip-git-repo-check"]
     if !codexModel.isEmpty { args += ["--model", codexModel] }
@@ -264,7 +264,7 @@ func codexChat(
     process.standardOutput = stdout
     process.standardError = FileHandle.nullDevice
 
-    final class Parse {
+    final class Parse: @unchecked Sendable {
         var buffer = Data()
         var emitted = false
     }
@@ -385,7 +385,7 @@ func mcpConfigJSON() -> String? {
 /// session id so the next turn can `--resume` it (each run issues a new id).
 /// Mutable parse state for the line reader (mutated only on the readability
 /// queue, which is serial, so no extra locking is needed).
-final class ClaudeParse {
+final class ClaudeParse: @unchecked Sendable {
     var buffer = Data()
     var sessionId: String?
     var resultError: String?
@@ -398,7 +398,7 @@ func claudeChat(
     prompt: String,
     systemPrompt: String?,
     resume: String?,
-    onText: @escaping (String) -> Void
+    onText: @escaping @Sendable (String) -> Void
 ) async throws -> String? {
     var args = [
         "-p", prompt,
@@ -560,7 +560,7 @@ final class AgentState: @unchecked Sendable {
 
 @main
 struct Agent {
-    static func main() async throws {
+    nonisolated static func main() async throws {
         if CommandLine.arguments.contains("--mcp") {
             try await runMCPServer()
             return
@@ -574,7 +574,7 @@ struct Agent {
         let state = AgentState()
         let peer = JSONRPCPeer(input: .standardInput, output: .standardOutput)
 
-        peer.requestHandler = { method, params in
+        peer.requestHandler = { @Sendable method, params in
             try await handle(
                 method: method, params: params, model: model, state: state, peer: peer)
         }
@@ -602,7 +602,7 @@ struct Agent {
 
         // MCP wants bare {name, description, inputSchema}; reuse the
         // OpenAI-shaped definitions used for Ollama.
-        let tools: [[String: Any]] = toolDefinitions.compactMap { def in
+        let tools: [[String: Any]] = makeToolDefinitions().compactMap { def in
             guard let function = def["function"] as? [String: Any] else { return nil }
             return [
                 "name": function["name"] ?? "",
@@ -646,7 +646,10 @@ struct Agent {
         // Exit with the client; otherwise one server lingers per claude run.
         // The pause lets in-flight handlers flush their responses first.
         peer.onClose = {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { exit(0) }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                exit(0)
+            }
         }
         peer.start()
         while true {
@@ -681,7 +684,7 @@ struct Agent {
                 .compactMap { $0["text"] as? String }
                 .joined(separator: "\n")
 
-            func emit(_ text: String) {
+            @Sendable func emit(_ text: String) {
                 peer.notify(
                     "session/update",
                     params: [

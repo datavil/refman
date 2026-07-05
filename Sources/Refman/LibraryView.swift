@@ -5,7 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
@@ -68,6 +68,8 @@ struct LibraryView: View {
     private final class BundleToken {}
 
     var body: some View {
+        @Bindable var model = model
+
         NavigationSplitView {
             sidebar
                 // Fixed width: the sidebar is unresizable but can be toggled.
@@ -217,7 +219,8 @@ struct LibraryView: View {
     }
 
     private var sidebar: some View {
-        List(selection: $model.sidebarSelection) {
+        @Bindable var model = model
+        return List(selection: $model.sidebarSelection) {
             Section("Library") {
                 Label("All Documents", systemImage: "books.vertical")
                     .tag(SidebarItem.all)
@@ -418,7 +421,8 @@ struct LibraryView: View {
     }
 
     private var documentTable: some View {
-        Table(
+        @Bindable var model = model
+        return Table(
             of: DocumentDetails.self,
             selection: $model.selectedDocumentIds,
             sortOrder: $sortOrder,
@@ -665,21 +669,28 @@ struct LibraryView: View {
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var urls: [URL] = []
-        let group = DispatchGroup()
-        for provider in providers {
-            group.enter()
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url, url.pathExtension.lowercased() == "pdf" {
+        Task {
+            var urls: [URL] = []
+            for provider in providers {
+                if let url = await pdfURL(from: provider) {
                     urls.append(url)
                 }
-                group.leave()
             }
-        }
-        group.notify(queue: .main) {
             if !urls.isEmpty { model.importPDFs(at: urls) }
         }
         return true
+    }
+
+    private func pdfURL(from provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { continuation in
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url, url.pathExtension.lowercased() == "pdf" else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: url)
+            }
+        }
     }
 }
 
@@ -690,12 +701,18 @@ struct LibraryView: View {
 private struct ToolbarConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        DispatchQueue.main.async { configure(view.window) }
+        Task { @MainActor [weak view] in
+            await Task.yield()
+            configure(view?.window)
+        }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { configure(nsView.window) }
+        Task { @MainActor [weak nsView] in
+            await Task.yield()
+            configure(nsView?.window)
+        }
     }
 
     private func configure(_ window: NSWindow?) {
@@ -788,7 +805,7 @@ extension NSView {
 /// Bottom of the sidebar: the Settings button, plus an "Update available" pill
 /// when a newer release was found by the background check.
 private struct SidebarFooter: View {
-    @ObservedObject var updater: Updater
+    var updater: Updater
     let openSettings: () -> Void
     let openAISettings: () -> Void
 
@@ -840,7 +857,7 @@ private struct SidebarFooter: View {
 /// Detail-panel view shown when a collection (and no document) is selected:
 /// its AI summary and a control to generate or refresh it.
 private struct CollectionDetailView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let collection: RefmanCore.Collection
 
     var body: some View {
@@ -891,7 +908,7 @@ private struct CollectionDetailView: View {
 
 /// One level of the collection hierarchy; recurses for subcollections.
 private struct CollectionTree: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let parentId: Int64?
     @Binding var collectionToDelete: RefmanCore.Collection?
     @Binding var subcollectionParent: RefmanCore.Collection?
@@ -1020,7 +1037,7 @@ private struct CollectionTree: View {
 
 /// ⌘K quick navigation across documents, collections, and actions.
 private struct CommandPalette: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @Binding var isPresented: Bool
     @State private var query = ""
     @State private var allDocs: [DocumentDetails] = []

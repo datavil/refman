@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
@@ -17,24 +17,27 @@ let package = Package(
             name: "RefmanCore",
             dependencies: [.product(name: "GRDB", package: "GRDB.swift")],
             resources: [.copy("Resources/Citeproc")],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "Refman",
             dependencies: ["RefmanCore"],
             resources: [.process("Resources")],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [
+                .defaultIsolation(MainActor.self),
+                .swiftLanguageMode(.v6),
+            ]
         ),
         .executableTarget(
             name: "RefmanAgent",
             dependencies: ["RefmanCore"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "RefmanCoreTests",
             dependencies: ["RefmanCore"],
             resources: [.copy("Fixtures")],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )

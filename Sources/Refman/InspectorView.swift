@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Right-hand metadata editor for the selected document.
 struct InspectorView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
     let details: DocumentDetails
