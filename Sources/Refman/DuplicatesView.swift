@@ -29,11 +29,21 @@ private struct DuplicateGroupSection: View {
     @Environment(AppModel.self) private var model
     let group: [DocumentDetails]
 
+    private var newestID: Int64? {
+        group.max { $0.document.addedAt < $1.document.addedAt }?.id
+    }
+
+    private var oldestID: Int64? {
+        group.min { $0.document.addedAt < $1.document.addedAt }?.id
+    }
+
     var body: some View {
         Section {
-            ForEach(group) { details in
+            ForEach(group.sorted { $0.document.addedAt > $1.document.addedAt }) { details in
                 DuplicateRow(
                     details: details,
+                    addedDateEmphasis: details.id == newestID
+                        ? .newest : details.id == oldestID ? .oldest : .none,
                     keep: { keep(details.id) },
                     remove: { model.delete(documentIds: [details.id]) })
             }
@@ -50,12 +60,14 @@ private struct DuplicateGroupSection: View {
 
 private struct DuplicateRow: View {
     @Environment(AppModel.self) private var model
+    @State private var highlightCount = 0
     let details: DocumentDetails
+    let addedDateEmphasis: AddedDateEmphasis
     let keep: () -> Void
     let remove: () -> Void
 
     var body: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .center) {
             Button {
                 model.selectedDocumentId = details.id
                 model.selectedDocumentIds = [details.id]
@@ -76,22 +88,79 @@ private struct DuplicateRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                    Text("Added \(details.document.addedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.subheadline)
-                        .bold()
+                    HStack {
+                        Label {
+                            Text(
+                                "\(addedDateEmphasis.label)Added \(details.document.addedAt.formatted(date: .abbreviated, time: .shortened))"
+                            )
+                        } icon: {
+                            Image(systemName: addedDateEmphasis.systemImage)
+                        }
+                        .foregroundStyle(addedDateEmphasis.color)
+
+                        if highlightCount > 0 {
+                            Label(
+                                "\(highlightCount) \(highlightCount == 1 ? "Highlight" : "Highlights")",
+                                systemImage: "highlighter"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.yellow.opacity(0.45), in: .capsule)
+                        }
+                    }
+                    .font(.subheadline)
                 }
             }
             .buttonStyle(.plain)
 
             Spacer()
 
-            Button("Keep", action: keep)
-                .help("Move the other copies in this group to the Trash")
-            Button(role: .destructive, action: remove) {
-                Label("Remove", systemImage: "trash")
+            HStack {
+                Button("Keep", action: keep)
+                    .help("Move the other copies in this group to the Trash")
+                Button(role: .destructive, action: remove) {
+                    Label("Remove", systemImage: "trash")
+                }
+                .labelStyle(.iconOnly)
+                .help("Move this copy to the Trash")
             }
-            .labelStyle(.iconOnly)
-            .help("Move this copy to the Trash")
+        }
+        .task(id: details.id) {
+            highlightCount =
+                (try? model.repository.annotations(documentId: details.id))?
+                .count(where: { $0.kind == .highlight }) ?? 0
+        }
+    }
+}
+
+private enum AddedDateEmphasis {
+    case newest
+    case oldest
+    case none
+
+    var label: String {
+        switch self {
+        case .newest: "Newest · "
+        case .oldest: "Oldest · "
+        case .none: ""
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .newest: "leaf.fill"
+        case .oldest: "hourglass.bottomhalf.filled"
+        case .none: "calendar"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .newest: .green
+        case .oldest: .orange
+        case .none: .secondary
         }
     }
 }

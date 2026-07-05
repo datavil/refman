@@ -8,6 +8,7 @@
 - simplicity first: minimum code, any overengineering shows at a glance
 - surgical edits: only touch what's required, don't fix up neighboring code on the way by
 - goal-driven: translate fuzzy instructions into verifiable targets before starting
+- After a successful code change, rebuild the app, close the running Refman, and open the new build.
 
 ## Principles
 ### 1. Think Before Coding
