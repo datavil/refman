@@ -25,6 +25,7 @@ struct LibraryView: View {
     @State private var columnCustomization = TableColumnCustomization<DocumentDetails>()
     @State private var showingImportReport = false
     @State private var showingPalette = false
+    @State private var searchTask: Task<Void, Never>?
 
     private var inTrash: Bool { model.sidebarSelection == .trash }
 
@@ -101,10 +102,21 @@ struct LibraryView: View {
             .navigationSplitViewColumnWidth(min: 392, ideal: 470)
         }
         .searchable(text: $model.searchText, prompt: "Search title, authors, full text")
+        .onChange(of: model.searchText) {
+            searchTask?.cancel()
+            searchTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                model.reload()
+            }
+        }
         // Defer reloads off the current update cycle: mutating the Table's data
         // synchronously from .onChange reenters the backing NSTableView delegate.
-        .onChange(of: model.searchText) { Task { @MainActor in model.reload() } }
-        .onChange(of: model.sidebarSelection) { Task { @MainActor in model.reload() } }
+        .onChange(of: model.sidebarSelection) {
+            searchTask?.cancel()
+            Task { @MainActor in model.reload() }
+        }
+        .onDisappear { searchTask?.cancel() }
         .onChange(of: appearance, initial: true) {
             // Drive AppKit appearance too, so panels and sheets follow along.
             switch AppAppearance(rawValue: appearance) ?? .system {

@@ -142,6 +142,24 @@ final class AppModel: ObservableObject {
         documents.first { $0.document.id == selectedDocumentId }
     }
 
+    private var selectedSearchScope: LibrarySearchScope {
+        switch sidebarSelection {
+        case .all: .all
+        case .recent:
+            .recent(
+                since: Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date())
+        case .recentlyOpened:
+            .recentlyOpened(
+                since: Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date())
+        case .reading: .reading
+        case .uncategorized: .uncategorized
+        case .duplicates: .duplicates
+        case .trash: .trash
+        case .collection(let id): .collection(id)
+        case .tag(let id): .tag(id)
+        }
+    }
+
     // MARK: - Loading
 
     func reload() {
@@ -149,7 +167,14 @@ final class AppModel: ObservableObject {
             collections = try repository.allCollections()
             tags = try repository.allTags()
             if !searchText.isEmpty {
-                documents = try repository.search(searchText)
+                documents = try repository.search(searchText, scope: selectedSearchScope)
+                if sidebarSelection == .duplicates {
+                    let matchingIds = Set(documents.map(\.id))
+                    duplicateGroups = try repository.duplicateGroups().filter { group in
+                        group.contains { matchingIds.contains($0.id) }
+                    }
+                    documents = duplicateGroups.flatMap { $0 }
+                }
             } else {
                 switch sidebarSelection {
                 case .all:

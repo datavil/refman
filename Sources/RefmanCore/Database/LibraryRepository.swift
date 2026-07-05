@@ -26,6 +26,19 @@ public struct DocumentDetails: Identifiable, Equatable, Hashable, Sendable {
     public var sortVenue: String { document.venue ?? "" }
 }
 
+/// The library section that constrains a full-text search.
+public enum LibrarySearchScope: Sendable {
+    case all
+    case recent(since: Date)
+    case recentlyOpened(since: Date)
+    case reading
+    case uncategorized
+    case duplicates
+    case trash
+    case collection(Int64)
+    case tag(Int64)
+}
+
 /// High-level library operations. All writes keep the FTS index in sync.
 public final class LibraryRepository: Sendable {
     public let database: AppDatabase
@@ -376,20 +389,76 @@ public final class LibraryRepository: Sendable {
 
     // MARK: - Search
 
-    /// FTS5 search across title, abstract, authors, and full text.
-    public func search(_ query: String) throws -> [DocumentDetails] {
+    /// FTS5 search across title, abstract, authors, and full text, constrained
+    /// to the selected library section.
+    public func search(
+        _ query: String, scope: LibrarySearchScope = .all
+    ) throws -> [DocumentDetails] {
+        if case .duplicates = scope {
+            let matchingIds = Set(try search(query, scope: .all).map(\.id))
+            return try duplicateGroups()
+                .filter { group in group.contains { matchingIds.contains($0.id) } }
+                .flatMap { $0 }
+        }
+
         let pattern = FTS5Pattern(matchingAllPrefixesIn: query)
         guard pattern != nil else { return [] }
+
+        let condition: String
+        var arguments: StatementArguments = [pattern]
+        switch scope {
+        case .all, .duplicates:
+            condition = "document.deletedAt IS NULL"
+        case .recent(let date):
+            condition = "document.deletedAt IS NULL AND document.addedAt >= ?"
+            arguments += [date]
+        case .recentlyOpened(let date):
+            condition = "document.deletedAt IS NULL AND document.openedAt >= ?"
+            arguments += [date]
+        case .reading:
+            condition = "document.deletedAt IS NULL AND document.isReading = 1"
+        case .uncategorized:
+            condition = """
+                document.deletedAt IS NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM collectionDocument
+                    WHERE collectionDocument.documentId = document.id
+                )
+                """
+        case .trash:
+            condition = "document.deletedAt IS NOT NULL"
+        case .collection(let id):
+            condition = """
+                document.deletedAt IS NULL
+                AND EXISTS (
+                    SELECT 1 FROM collectionDocument
+                    WHERE collectionDocument.documentId = document.id
+                    AND collectionDocument.collectionId = ?
+                )
+                """
+            arguments += [id]
+        case .tag(let id):
+            condition = """
+                document.deletedAt IS NULL
+                AND EXISTS (
+                    SELECT 1 FROM documentTag
+                    WHERE documentTag.documentId = document.id
+                    AND documentTag.tagId = ?
+                )
+                """
+            arguments += [id]
+        }
+
         return try dbWriter.read { db in
             let docs = try Document.fetchAll(
                 db,
                 sql: """
                     SELECT document.* FROM document
                     JOIN documentFTS ON documentFTS.rowid = document.id
-                    WHERE documentFTS MATCH ? AND document.deletedAt IS NULL
+                    WHERE documentFTS MATCH ? AND \(condition)
                     ORDER BY rank
                     """,
-                arguments: [pattern])
+                arguments: arguments)
             return try docs.map { doc in
                 DocumentDetails(
                     document: doc,

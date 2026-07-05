@@ -108,6 +108,48 @@ import Testing
         #expect(try repo.search("prot").count == 1)
     }
 
+    @Test func searchRespectsEveryLibraryScope() throws {
+        let repo = try makeRepo()
+        let oldDate = Date(timeIntervalSince1970: 0)
+        let recentCutoff = Date().addingTimeInterval(-3600)
+
+        let collectionMatch = try repo.insert(Document(title: "Scopeword collection"))
+        let otherMatch = try repo.insert(
+            Document(title: "Scopeword other", addedAt: oldDate, modifiedAt: oldDate))
+        let trashMatch = try repo.insert(Document(title: "Scopeword trash"))
+        _ = try repo.insert(Document(title: "Different paper"))
+
+        let collection = try repo.createCollection(name: "Scoped")
+        try repo.add(documentId: collectionMatch.id, toCollection: collection.id!)
+        let tag = try repo.addTag("scoped", toDocument: collectionMatch.id)
+        try repo.markOpened(documentId: otherMatch.id)
+        try repo.setReading(documentId: otherMatch.id)
+        try repo.delete(documentId: trashMatch.id)
+
+        func titles(in scope: LibrarySearchScope) throws -> Set<String> {
+            Set(try repo.search("scopeword", scope: scope).map(\.document.title))
+        }
+
+        #expect(try titles(in: .all) == ["Scopeword collection", "Scopeword other"])
+        #expect(try titles(in: .recent(since: recentCutoff)) == ["Scopeword collection"])
+        #expect(try titles(in: .recentlyOpened(since: recentCutoff)) == ["Scopeword other"])
+        #expect(try titles(in: .reading) == ["Scopeword other"])
+        #expect(try titles(in: .uncategorized) == ["Scopeword other"])
+        #expect(try titles(in: .trash) == ["Scopeword trash"])
+        #expect(try titles(in: .collection(collection.id!)) == ["Scopeword collection"])
+        #expect(try titles(in: .tag(tag.id!)) == ["Scopeword collection"])
+
+        let duplicateA = try repo.insert(
+            Document(title: "Scopeword duplicate", doi: "10.1000/duplicate"))
+        let duplicateB = try repo.insert(
+            Document(title: "Matching duplicate", doi: "10.1000/duplicate"))
+        _ = try repo.insert(Document(title: "Scopeword unique", doi: "10.1000/unique"))
+
+        #expect(
+            try Set(repo.search("scopeword", scope: .duplicates).map(\.id))
+                == [duplicateA.id, duplicateB.id])
+    }
+
     @Test func collectionsScopeDocuments() throws {
         let repo = try makeRepo()
         let docA = try repo.insert(Document(title: "A"))
