@@ -12,7 +12,7 @@ struct ChatMessage: Identifiable, Equatable {
 /// A one-tap assistant action: a short user-facing `label` and the full
 /// instruction (`prompt`) that is sent to the model but kept out of sight.
 struct AssistantAction: Identifiable, Equatable {
-    let id = UUID()
+    var id = UUID()
     let label: String
     let prompt: String
     /// When set, the assistant's reply is stored in this insight field.
@@ -21,8 +21,23 @@ struct AssistantAction: Identifiable, Equatable {
 
 /// Built-in prompts behind the quick-action buttons.
 enum AssistantPrompts {
-    /// Document-level queries shown as chips in the assistant panel.
-    static let document: [AssistantAction] = [
+    /// Document-level queries shown as chips in the assistant panel, with any
+    /// user prompt overrides (from AI Settings) applied over the defaults.
+    static var document: [AssistantAction] {
+        defaultDocument.map { action in
+            guard let insight = action.saves else { return action }
+            let key = SettingsKeys.promptOverride(forInsight: insight.rawValue)
+            guard let text = UserDefaults.standard.string(forKey: key), !text.isEmpty
+            else { return action }
+            return AssistantAction(
+                id: action.id, label: action.label, prompt: text, saves: insight)
+        }
+    }
+
+    /// Built-in defaults for the document-level actions. Kept separate from
+    /// `document` so untouched prompts keep receiving improved defaults from
+    /// app updates, and "Reset to default" is just clearing the override.
+    static let defaultDocument: [AssistantAction] = [
         AssistantAction(
             label: "Summarize",
             prompt: """
@@ -61,6 +76,26 @@ enum AssistantPrompts {
                 """,
             saves: .limitations),
     ]
+
+    /// Override key for the collection-summary prompt (not a DocumentInsight).
+    static let collectionSummaryKey = "collectionSummary"
+
+    /// The instruction sent when summarizing a whole collection; the assembled
+    /// full text of its papers is appended after this by the caller. Editable in
+    /// AI Settings, overriding `defaultCollectionSummary`.
+    static var collectionSummary: String {
+        let key = SettingsKeys.promptOverride(forInsight: collectionSummaryKey)
+        let override = UserDefaults.standard.string(forKey: key) ?? ""
+        return override.isEmpty ? defaultCollectionSummary : override
+    }
+
+    static let defaultCollectionSummary = """
+        Summarize this collection of papers as a coherent synthesis, based on the full text \
+        of each paper provided below. Identify the shared themes, how the papers relate to and \
+        differ from one another, and the overall state of the topic, in 2–4 short paragraphs. \
+        State the substance directly, without narrative framing such as "these papers" or "the \
+        authors". Be concise and avoid filler.
+        """
 
     static func summarize(_ passage: String) -> AssistantAction {
         AssistantAction(

@@ -149,10 +149,14 @@ public struct Collection: Identifiable, Equatable, Hashable, Codable,
     public var icon: String?
     /// Manual ordering among siblings (same `parentId`); lower sorts first.
     public var sortOrder: Int
+    /// An AI-generated summary synthesizing the collection's papers.
+    public var summary: String?
+    public var summaryUpdatedAt: Date?
 
     public init(
         id: Int64? = nil, uuid: String = UUID().uuidString, name: String,
-        parentId: Int64? = nil, icon: String? = nil, sortOrder: Int = 0
+        parentId: Int64? = nil, icon: String? = nil, sortOrder: Int = 0,
+        summary: String? = nil, summaryUpdatedAt: Date? = nil
     ) {
         self.id = id
         self.uuid = uuid
@@ -160,6 +164,8 @@ public struct Collection: Identifiable, Equatable, Hashable, Codable,
         self.parentId = parentId
         self.icon = icon
         self.sortOrder = sortOrder
+        self.summary = summary
+        self.summaryUpdatedAt = summaryUpdatedAt
     }
 
     public static let databaseTableName = "collection"

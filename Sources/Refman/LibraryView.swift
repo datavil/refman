@@ -87,6 +87,11 @@ struct LibraryView: View {
                 } else if let details = model.selectedDocument {
                     InspectorView(details: details)
                         .id(details.document.id)  // reset editing state on selection change
+                } else if case .collection(let id) = model.sidebarSelection,
+                    let collection = model.collections.first(where: { $0.id == id })
+                {
+                    CollectionDetailView(collection: collection)
+                        .id(id)
                 } else {
                     ContentUnavailableView(
                         "No Selection", systemImage: "doc.text",
@@ -820,6 +825,58 @@ private struct SidebarFooter: View {
     }
 }
 
+/// Detail-panel view shown when a collection (and no document) is selected:
+/// its AI summary and a control to generate or refresh it.
+private struct CollectionDetailView: View {
+    @EnvironmentObject var model: AppModel
+    let collection: RefmanCore.Collection
+
+    var body: some View {
+        let id = collection.id ?? -1
+        let generating = model.isGeneratingCollectionSummary(id)
+        Form {
+            Section {
+                Button {
+                    model.summarizeCollection(id: id)
+                } label: {
+                    Label(
+                        collection.summary == nil ? "Summarize Collection" : "Refresh Summary",
+                        systemImage: "sparkles"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .disabled(generating)
+            }
+
+            Section("Summary") {
+                if generating {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Generating…").foregroundStyle(.secondary)
+                    }
+                } else if let summary = collection.summary?.trimmingCharacters(in: .whitespaces),
+                    !summary.isEmpty
+                {
+                    ScrollableMaxHeight(maxHeight: 400) {
+                        MarkdownText(text: summary).textSelection(.enabled)
+                    }
+                    if let updated = collection.summaryUpdatedAt {
+                        Text("Updated \(updated.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Summarize this collection to synthesize its papers from their full text.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle(collection.name)
+    }
+}
+
 /// One level of the collection hierarchy; recurses for subcollections.
 private struct CollectionTree: View {
     @EnvironmentObject var model: AppModel
@@ -921,6 +978,12 @@ private struct CollectionTree: View {
                 Button("Import from Folder…") {
                     model.importFromFolderViaPanel(collectionId: collection.id!)
                 }
+                Divider()
+                Button("Summarize Collection", systemImage: "sparkles") {
+                    model.summarizeCollection(id: collection.id!)
+                }
+                .disabled(model.isGeneratingCollectionSummary(collection.id ?? -1))
+                Divider()
                 Button("Delete Collection", role: .destructive) {
                     collectionToDelete = collection
                 }

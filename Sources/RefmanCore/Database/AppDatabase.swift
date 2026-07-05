@@ -272,6 +272,14 @@ public final class AppDatabase: Sendable {
             try db.rename(table: "document_new", to: "document")
         }
 
+        migrator.registerMigration("v12") { db in
+            // An AI-generated summary of a whole collection, kept on the row.
+            try db.alter(table: "collection") { t in
+                t.add(column: "summary", .text)
+                t.add(column: "summaryUpdatedAt", .datetime)
+            }
+        }
+
         return migrator
     }
 }

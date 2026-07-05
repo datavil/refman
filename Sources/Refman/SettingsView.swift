@@ -107,6 +107,12 @@ enum SettingsKeys {
     static let citationStyle = "citationStyle"
     static let contactEmail = "contactEmail"
     static let libraryRootPath = "libraryRootPath"
+
+    /// UserDefaults key holding the user's override for a preset AI prompt.
+    /// `raw` is the DocumentInsight raw value (e.g. "summary").
+    static func promptOverride(forInsight raw: String) -> String {
+        "prompt.\(raw)"
+    }
 }
 
 /// Lists models from a local Ollama for the model picker.

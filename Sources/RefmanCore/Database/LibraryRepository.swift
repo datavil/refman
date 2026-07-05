@@ -436,6 +436,15 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    /// Stores an AI-generated summary of a collection, with its generation time.
+    public func setCollectionSummary(id: Int64, text: String) throws {
+        try dbWriter.write { db in
+            try db.execute(
+                sql: "UPDATE collection SET summary = ?, summaryUpdatedAt = ? WHERE id = ?",
+                arguments: [text, Date(), id])
+        }
+    }
+
     public func setCollectionIcon(id: Int64, to icon: String?) throws {
         try dbWriter.write { db in
             try db.execute(

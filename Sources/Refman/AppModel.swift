@@ -72,6 +72,8 @@ final class AppModel: ObservableObject {
     @Published var duplicateGroups: [[DocumentDetails]] = []
     /// AI insight generations currently running, so the UI can show a spinner.
     @Published var generatingInsights: Set<InsightJob> = []
+    /// Collection ids whose summary is currently being generated.
+    @Published var generatingCollectionSummaries: Set<Int64> = []
     @Published var collections: [RefmanCore.Collection] = []
     @Published var tags: [Tag] = []
     @Published var sidebarSelection: SidebarItem = .all
@@ -615,6 +617,63 @@ final class AppModel: ObservableObject {
     /// True while the given insight is being generated for a document.
     func isGeneratingInsight(_ insight: DocumentInsight, for id: Int64) -> Bool {
         generatingInsights.contains(InsightJob(documentId: id, insight: insight))
+    }
+
+    /// Total character budget for the full text fed into a collection summary,
+    /// split across its papers so a large collection can't overflow the model.
+    private static let collectionTextBudget = 60_000
+
+    /// Generates a synthesizing summary of a collection from the full text of its
+    /// papers and stores it on the collection. Always regenerates.
+    func summarizeCollection(id: Int64) {
+        guard !generatingCollectionSummaries.contains(id) else { return }
+        let docs = (try? repository.allDocuments(in: id)) ?? []
+        guard !docs.isEmpty else {
+            statusMessage = "This collection has no documents to summarize."
+            return
+        }
+        let name = collections.first { $0.id == id }?.name ?? ""
+        let repository = self.repository
+        generatingCollectionSummaries.insert(id)
+        statusMessage = "Summarizing “\(name)”…"
+        Task {
+            defer { generatingCollectionSummaries.remove(id) }
+            do {
+                let digest = Self.collectionDigest(docs, repository: repository)
+                let prompt = AssistantPrompts.collectionSummary + "\n\n" + digest
+                let text = try await AssistantModel.generateText(
+                    prompt: prompt, documentId: docs[0].id, repository: repository)
+                guard !text.isEmpty else {
+                    statusMessage = "Summary came back empty"
+                    return
+                }
+                try repository.setCollectionSummary(id: id, text: text)
+                reload()
+                statusMessage = "Summary created for “\(name)”"
+            } catch {
+                statusMessage = "Collection summary failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// True while the given collection's summary is being generated.
+    func isGeneratingCollectionSummary(_ id: Int64) -> Bool {
+        generatingCollectionSummaries.contains(id)
+    }
+
+    /// Assembles the papers into a titled digest, truncating each to its share of
+    /// the budget (falling back to the abstract when full text is unavailable).
+    private static func collectionDigest(
+        _ docs: [DocumentDetails], repository: LibraryRepository
+    ) -> String {
+        let perDoc = max(1, collectionTextBudget / docs.count)
+        return docs.map { details in
+            let title = details.document.title.isEmpty ? "Untitled" : details.document.title
+            let full = (try? repository.fullText(documentId: details.id)) ?? nil
+            let body = (full ?? details.document.abstract ?? "").prefix(perDoc)
+            return "## \(title)\n\(body)"
+        }
+        .joined(separator: "\n\n")
     }
 
     func update(_ document: Document, authors: [Author]? = nil) {
