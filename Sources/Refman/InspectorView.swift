@@ -11,6 +11,8 @@ struct InspectorView: View {
     @State private var draft: Document
     @State private var authorsText: String
     @State private var newTag = ""
+    @State private var isEditingAbstract = false
+    @FocusState private var abstractFocused: Bool
 
     init(details: DocumentDetails) {
         self.details = details
@@ -51,12 +53,37 @@ struct InspectorView: View {
                 TextField("URL", text: bind(\.url))
             }
 
-            Section("Abstract") {
+            Section {
                 ScrollableMaxHeight(maxHeight: 220) {
-                    TextField("Abstract", text: bind(\.abstract), axis: .vertical)
-                        .lineLimit(3...)
-                        .multilineTextAlignment(.leading)
-                        .labelsHidden()
+                    if isEditingAbstract {
+                        TextField("Abstract", text: bind(\.abstract), axis: .vertical)
+                            .lineLimit(3...)
+                            .multilineTextAlignment(.leading)
+                            .labelsHidden()
+                            .focused($abstractFocused)
+                    } else if let abstract = draft.abstract, !abstract.isEmpty {
+                        Text(abstract)
+                            .lineSpacing(3)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text("No abstract available.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Abstract")
+                    Spacer()
+                    Button(
+                        isEditingAbstract ? "Done" : "Edit",
+                        systemImage: isEditingAbstract ? "checkmark" : "pencil"
+                    ) {
+                        isEditingAbstract.toggle()
+                        abstractFocused = isEditingAbstract
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 }
             }
 
@@ -79,15 +106,12 @@ struct InspectorView: View {
             }
 
             Section {
-                Button("Save Changes") { save() }
+                Button("Save Changes") {
+                    save()
+                    isEditingAbstract = false
+                }
                     .keyboardShortcut("s", modifiers: [.command])
                     .disabled(!hasChanges)
-                Button("Copy BibTeX") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(
-                        BibTeX.export(currentDetails), forType: .string)
-                    model.statusMessage = "BibTeX copied"
-                }
             }
         }
         .formStyle(.grouped)
@@ -131,10 +155,6 @@ struct InspectorView: View {
     private var hasChanges: Bool {
         draft != details.document
             || authorsText != details.authors.map(\.displayName).joined(separator: " and ")
-    }
-
-    private var currentDetails: DocumentDetails {
-        DocumentDetails(document: draft, authors: parsedAuthors, tags: details.tags)
     }
 
     private var parsedAuthors: [Author] {
