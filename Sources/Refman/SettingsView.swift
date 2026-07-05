@@ -488,13 +488,39 @@ struct AssistantProviderPicker: View {
     var label = "Provider"
     var compact = false
 
+    private var options: [(id: String, title: String)] {
+        [
+            ("ollama", compact ? "Ollama" : "Local (Ollama)"),
+            ("openai", "OpenAI"),
+            ("claude", "Claude"),
+        ]
+    }
+
     var body: some View {
-        Picker(label, selection: $selection) {
-            Text(compact ? "Ollama" : "Local (Ollama)").tag("ollama")
-            Text("OpenAI").tag("openai")
-            Text("Claude").tag("claude")
+        LabeledContent(label) {
+            HStack(spacing: 0) {
+                ForEach(options, id: \.id) { option in
+                    Button(option.title) {
+                        selection = option.id
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(
+                        selection == option.id
+                            ? Color(nsColor: .selectedControlTextColor) : .primary
+                    )
+                    .background(
+                        selection == option.id ? AppAccent.stored.color : .clear,
+                        in: .rect(cornerRadius: 5)
+                    )
+                    .accessibilityAddTraits(selection == option.id ? .isSelected : [])
+                }
+            }
+            .padding(2)
+            .background(.quaternary, in: .rect(cornerRadius: 7))
         }
-        .pickerStyle(.segmented)
     }
 }
 

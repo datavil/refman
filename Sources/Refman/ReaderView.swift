@@ -198,7 +198,7 @@ struct ReaderView: View {
                 Spacer()
 
                 Toggle(isOn: $showAssistant) {
-                    Label("Assistant", systemImage: "sparkles")
+                    Label("Assistant", systemImage: "aqi.medium")
                 }
             }
         }
@@ -1307,7 +1307,7 @@ struct SelectionPen: View {
             Button {
                 reader.askAI()
             } label: {
-                Label("Ask AI", systemImage: "sparkles")
+                Label("Ask AI", systemImage: "aqi.medium")
                     .labelStyle(.titleAndIcon)
                     .font(.system(size: 12, weight: .medium))
             }

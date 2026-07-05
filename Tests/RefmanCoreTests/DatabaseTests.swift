@@ -158,11 +158,13 @@ import Testing
         try repo.add(documentId: docA.id, toCollection: collection.id!)
 
         #expect(try repo.allDocuments().count == 2)
+        #expect(try repo.documentCount(in: collection.id!) == 1)
         let scoped = try repo.allDocuments(in: collection.id!)
         #expect(scoped.map(\.document.title) == ["A"])
 
         try repo.remove(documentId: docA.id, fromCollection: collection.id!)
         #expect(try repo.allDocuments(in: collection.id!).isEmpty)
+        #expect(try repo.documentCount(in: collection.id!) == 0)
     }
 
     @Test func collectionsReorder() throws {

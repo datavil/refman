@@ -836,7 +836,7 @@ private struct SidebarFooter: View {
             Button {
                 openAISettings()
             } label: {
-                Label("AI Settings", systemImage: "sparkles")
+                Label("AI Settings", systemImage: "aqi.medium")
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -863,44 +863,81 @@ private struct CollectionDetailView: View {
     var body: some View {
         let id = collection.id ?? -1
         let generating = model.isGeneratingCollectionSummary(id)
-        Form {
-            Section {
-                Button {
-                    model.summarizeCollection(id: id)
-                } label: {
-                    Label(
-                        collection.summary == nil ? "Summarize Collection" : "Refresh Summary",
-                        systemImage: "sparkles"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .controlSize(.large)
-                .disabled(generating)
-            }
+        let documentCount = (try? model.repository.documentCount(in: id)) ?? 0
+        let summary = collection.summary?.trimmingCharacters(in: .whitespaces)
+        let hasSummary = summary?.isEmpty == false
 
-            Section("Summary") {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: collection.icon ?? "folder")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(collection.name)
+                            .font(.title2)
+                            .bold()
+                        Text(
+                            "\(documentCount) paper\(documentCount == 1 ? "" : "s")"
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if hasSummary, !generating {
+                        Button("Refresh", systemImage: "aqi.medium") {
+                            model.summarizeCollection(id: id)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                Divider()
+
                 if generating {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Generating…").foregroundStyle(.secondary)
-                    }
-                } else if let summary = collection.summary?.trimmingCharacters(in: .whitespaces),
-                    !summary.isEmpty
-                {
-                    ScrollableMaxHeight(maxHeight: 400) {
-                        MarkdownText(text: summary).textSelection(.enabled)
-                    }
-                    if let updated = collection.summaryUpdatedAt {
-                        Text("Updated \(updated.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Synthesizing \(documentCount) paper\(documentCount == 1 ? "" : "s")…")
                             .foregroundStyle(.secondary)
                     }
-                } else {
-                    Text("Summarize this collection to synthesize its papers from their full text.")
-                        .font(.callout)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 48)
+                } else if let summary, !summary.isEmpty {
+                    MarkdownText(text: summary)
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+
+                    if let updated = collection.summaryUpdatedAt {
+                        Label(
+                            "Updated \(updated.formatted(date: .abbreviated, time: .shortened))",
+                            systemImage: "clock"
+                        )
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Collection summary")
+                            .font(.headline)
+                        Text(
+                            "Create a concise synthesis of the shared themes, methods, and findings across this collection."
+                        )
+                        .foregroundStyle(.secondary)
+
+                        Button("Generate Summary", systemImage: "aqi.medium") {
+                            model.summarizeCollection(id: id)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(documentCount == 0)
+                    }
                 }
             }
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(collection.name)
     }
@@ -1008,7 +1045,7 @@ private struct CollectionTree: View {
                     model.importFromFolderViaPanel(collectionId: collection.id!)
                 }
                 Divider()
-                Button("Summarize Collection", systemImage: "sparkles") {
+                Button("Summarize Collection", systemImage: "aqi.medium") {
                     model.summarizeCollection(id: collection.id!)
                 }
                 .disabled(model.isGeneratingCollectionSummary(collection.id ?? -1))

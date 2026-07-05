@@ -221,6 +221,21 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    /// Number of live documents in one collection.
+    public func documentCount(in collectionId: Int64) throws -> Int {
+        try dbWriter.read { db in
+            try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COUNT(*) FROM collectionDocument
+                    JOIN document ON document.id = collectionDocument.documentId
+                    WHERE collectionDocument.collectionId = ?
+                    AND document.deletedAt IS NULL
+                    """,
+                arguments: [collectionId]) ?? 0
+        }
+    }
+
     /// Documents added on or after the given date, newest first.
     public func recentDocuments(since date: Date) throws -> [DocumentDetails] {
         try dbWriter.read { db in
