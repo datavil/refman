@@ -77,6 +77,7 @@ import Testing
         let doc = result.details.document
         #expect(doc.doi == "10.1234/example.5678")
         #expect(doc.arxivId == "2401.12345")
+        #expect(doc.abstract == "We study things in depth using novel methodology.")
         #expect(doc.fileHash != nil)
         #expect(store.exists(hash: doc.fileHash!))
 
@@ -123,5 +124,22 @@ import Testing
         let counts = try repo.counts()
         #expect(counts.live == 1)
         #expect(counts.trashed == 0)
+    }
+
+    @Test func refreshRecoversAbstractFromAttachedPDFWithoutOnlineMetadata() async throws {
+        let (pipeline, repo, store) = try makePipeline()
+        defer { try? FileManager.default.removeItem(at: store.rootURL) }
+
+        let pdf = try makePDF(
+            text: "Abstract | This abstract was present only in the PDF.\n\nMain\nArticle body.")
+        defer { try? FileManager.default.removeItem(at: pdf) }
+
+        let hash = try store.ingest(fileAt: pdf)
+        let details = try repo.insert(
+            Document(title: "Offline Paper", fileHash: hash, fileName: pdf.lastPathComponent))
+
+        let refreshed = try #require(
+            try await pipeline.refreshMetadata(for: details.document))
+        #expect(refreshed.document.abstract == "This abstract was present only in the PDF.")
     }
 }

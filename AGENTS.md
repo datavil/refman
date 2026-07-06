@@ -1,4 +1,3 @@
-
 # Project Instructions
 
 ## Preferences
@@ -173,4 +172,3 @@ If the Xcode MCP is configured, prefer its tools over generic alternatives when 
 - `XcodeListNavigatorIssues` — check for issues visible in the Xcode Issue Navigator
 - `ExecuteSnippet` — test a code snippet in the context of a source file
 - `XcodeRead`, `XcodeWrite`, `XcodeUpdate` — prefer these over generic file tools when working with Xcode project files
-

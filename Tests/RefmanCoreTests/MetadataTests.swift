@@ -3,6 +3,49 @@ import Testing
 
 @testable import RefmanCore
 
+@Suite struct PDFTextExtractorTests {
+    @Test func extractsAbstractUntilIntroduction() {
+        let text = """
+            A Paper Title
+            Jane Researcher
+
+            Abstract
+            Background
+            Existing extraction misses some layouts.
+            Results
+            This parser handles them.
+
+            1. Introduction
+            This must not become part of the abstract.
+            """
+
+        #expect(
+            PDFTextExtractor.abstract(in: text)
+                == "Existing extraction misses some layouts. This parser handles them.")
+    }
+
+    @Test func extractsInlineAndLetterSpacedHeadings() {
+        #expect(
+            PDFTextExtractor.abstract(
+                in: "Abstract | We present a robust parser.\nKeywords: parsing, metadata")
+                == "We present a robust parser.")
+        #expect(
+            PDFTextExtractor.abstract(in: "Abstract—We handle dash separators.\n1 Introduction")
+                == "We handle dash separators.")
+        #expect(
+            PDFTextExtractor.abstract(
+                in: "A B S T R A C T  We support letter-spaced headings.\nI. INTRODUCTION")
+                == "We support letter-spaced headings.")
+        #expect(
+            PDFTextExtractor.abstract(in: "Summary\nWe also support summary headings.\nMain")
+                == "We also support summary headings.")
+    }
+
+    @Test func ignoresTitleBeginningWithAbstract() {
+        #expect(PDFTextExtractor.abstract(in: "Abstract Algebra for Beginners\nChapter One") == nil)
+    }
+}
+
 @Suite struct IdentifierScannerTests {
     @Test func findsDOIInProse() {
         let text = "This article (doi: 10.1038/s41586-021-03819-2). More text follows."

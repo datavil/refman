@@ -123,6 +123,12 @@ struct InspectorView: View {
             draft.methods = details.document.methods
             draft.limitations = details.document.limitations
         }
+        // Refresh a newly extracted abstract without discarding an unsaved edit.
+        .onChange(of: details.document.abstract) { previous, abstract in
+            if draft.abstract == previous {
+                draft.abstract = abstract
+            }
+        }
     }
 
     /// A read-only section rendering one AI insight as Markdown, with a hint

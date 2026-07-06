@@ -101,6 +101,9 @@ public struct ImportPipeline: Sendable {
         if let existing = try repository.liveDocumentNeedingPDF(doi: doi, arxivId: arxivId) {
             var updated = existing
             record?.apply(to: &updated)
+            if updated.abstract?.isEmpty != false {
+                updated.abstract = extracted?.abstract
+            }
             updated.fileHash = hash
             updated.fileName = url.lastPathComponent
             let details = try repository.update(
@@ -113,6 +116,7 @@ public struct ImportPipeline: Sendable {
 
         var document = Document(
             title: extracted?.embeddedTitle ?? url.deletingPathExtension().lastPathComponent,
+            abstract: extracted?.abstract,
             doi: doi,
             arxivId: arxivId,
             fileHash: hash,
@@ -157,7 +161,11 @@ public struct ImportPipeline: Sendable {
             let hash = try store.ingest(data: data)
             document.fileHash = hash
             document.fileName = name
-            fullText = PDFTextExtractor.extract(from: store.url(forHash: hash))?.fullText
+            let extracted = PDFTextExtractor.extract(from: store.url(forHash: hash))
+            fullText = extracted?.fullText
+            if document.abstract?.isEmpty != false {
+                document.abstract = extracted?.abstract
+            }
         }
 
         let details = try repository.insert(
@@ -172,8 +180,11 @@ public struct ImportPipeline: Sendable {
         var updated = document
         updated.fileHash = hash
         updated.fileName = url.lastPathComponent
-        let fullText = PDFTextExtractor.extract(from: store.url(forHash: hash))?.fullText
-        return try repository.update(updated, fullText: fullText)
+        let extracted = PDFTextExtractor.extract(from: store.url(forHash: hash))
+        if updated.abstract?.isEmpty != false {
+            updated.abstract = extracted?.abstract
+        }
+        return try repository.update(updated, fullText: extracted?.fullText)
     }
 
     /// Downloads and attaches an open-access PDF to an existing document.
@@ -187,8 +198,11 @@ public struct ImportPipeline: Sendable {
         var updated = document
         updated.fileHash = hash
         updated.fileName = name
-        let fullText = PDFTextExtractor.extract(from: store.url(forHash: hash))?.fullText
-        return try repository.update(updated, fullText: fullText)
+        let extracted = PDFTextExtractor.extract(from: store.url(forHash: hash))
+        if updated.abstract?.isEmpty != false {
+            updated.abstract = extracted?.abstract
+        }
+        return try repository.update(updated, fullText: extracted?.fullText)
     }
 
     /// Finds a downloadable PDF, preferring the arXiv copy and falling back to
@@ -215,11 +229,13 @@ public struct ImportPipeline: Sendable {
         if record == nil, let arxivId = document.arxivId {
             record = try? await arXiv.resolve(arxivId: arxivId)
         }
-        guard let record else { return nil }
-
         var updated = document
-        record.apply(to: &updated)
-        let authors = record.authors.isEmpty ? nil : record.authorRecords
+        record?.apply(to: &updated)
+        if updated.abstract?.isEmpty != false, let hash = updated.fileHash {
+            updated.abstract = PDFTextExtractor.extract(from: store.url(forHash: hash))?.abstract
+        }
+        guard record != nil || updated.abstract != document.abstract else { return nil }
+        let authors = record.flatMap { $0.authors.isEmpty ? nil : $0.authorRecords }
         return try repository.update(updated, authors: authors)
     }
 }
