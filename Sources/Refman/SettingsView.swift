@@ -191,71 +191,75 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section("Appearance") {
-                Picker("Theme", selection: $appearance) {
-                    ForEach(AppAppearance.allCases) { option in
-                        Text(option.label).tag(option.rawValue)
+        ScrollViewReader { scrollProxy in
+            Form {
+                Section("Appearance") {
+                    Picker("Theme", selection: $appearance) {
+                        ForEach(AppAppearance.allCases) { option in
+                            Text(option.label).tag(option.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    LabeledContent("Accent") {
+                        AccentColorPicker(selection: $accentColor)
+                    }
+                    if accentNeedsRelaunch {
+                        HStack {
+                            Text("Relaunch Refman to apply the accent.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Relaunch") { model.relaunch() }
+                                .controlSize(.small)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                LabeledContent("Accent") {
-                    AccentColorPicker(selection: $accentColor)
+                .onChange(of: accentColor) { _, newValue in
+                    (AppAccent(rawValue: newValue) ?? .system).applyToDefaults()
+                    accentNeedsRelaunch = true
                 }
-                if accentNeedsRelaunch {
-                    HStack {
-                        Text("Relaunch Refman to apply the accent.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Relaunch") { model.relaunch() }
-                            .controlSize(.small)
+                .id("settings-top")
+
+                LibrarySettingsSection()
+
+                ICloudSettingsSection()
+
+                UpdatesSettingsSection(updater: model.updater)
+
+                Section("Metadata & Downloads") {
+                    TextField(
+                        "Contact email", text: $contactEmail,
+                        prompt: Text("you@example.com"))
+                        .focused($emailFocused)
+                    if !contactEmail.isEmpty && !isEmailValid {
+                        Text("Enter a valid email address.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
+                    Text(
+                        "Used to fetch open-access PDFs (Unpaywall) and for polite API "
+                            + "access to CrossRef. Required for DOI PDF downloads."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
-            .onChange(of: accentColor) { _, newValue in
-                (AppAccent(rawValue: newValue) ?? .system).applyToDefaults()
-                accentNeedsRelaunch = true
-            }
-
-            LibrarySettingsSection()
-
-            ICloudSettingsSection()
-
-            UpdatesSettingsSection(updater: model.updater)
-
-            Section("Metadata & Downloads") {
-                TextField(
-                    "Contact email", text: $contactEmail,
-                    prompt: Text("you@example.com"))
-                    .focused($emailFocused)
-                if !contactEmail.isEmpty && !isEmailValid {
-                    Text("Enter a valid email address.")
-                        .font(.caption)
-                        .foregroundStyle(.red)
+            .formStyle(.grouped)
+            .contentShape(Rectangle())
+            .onAppear {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    emailFocused = false
+                    scrollProxy.scrollTo("settings-top", anchor: .top)
                 }
-                Text(
-                    "Used to fetch open-access PDFs (Unpaywall) and for polite API "
-                        + "access to CrossRef. Required for DOI PDF downloads."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
-        }
-        .formStyle(.grouped)
-        .contentShape(Rectangle())
-        .onAppear {
-            Task {
-                try? await Task.sleep(for: .milliseconds(50))
-                emailFocused = false
+            .onTapGesture { emailFocused = false }
+            .frame(width: 480, height: 600)
+            .background {
+                // Esc closes the Settings window.
+                Button("") { NSApp.keyWindow?.close() }
+                    .keyboardShortcut(.cancelAction)
+                    .hidden()
             }
-        }
-        .onTapGesture { emailFocused = false }
-        .frame(width: 480, height: 600)
-        .background {
-            // Esc closes the Settings window.
-            Button("") { NSApp.keyWindow?.close() }
-                .keyboardShortcut(.cancelAction)
-                .hidden()
         }
     }
 
