@@ -2,7 +2,6 @@ import AppKit
 import QuickLook
 import RefmanCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
@@ -975,7 +974,6 @@ private struct CollectionDetailView: View {
     @State private var noteBodyDraft = ""
     @State private var isEditingNote = false
     @State private var noteToDelete: CollectionNote?
-    @State private var draggingNoteId: Int64?
 
     init(collection: RefmanCore.Collection) {
         self.collection = collection
@@ -1141,8 +1139,26 @@ private struct CollectionDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(notes) { note in
                             HStack(spacing: 8) {
+                                HStack(spacing: 2) {
+                                    Button("Move Up", systemImage: "chevron.up") {
+                                        move(note, by: -1, collectionId: collectionId)
+                                    }
+                                    .disabled(!canMove(note, by: -1))
+                                    .help("Move note up")
+
+                                    Button("Move Down", systemImage: "chevron.down") {
+                                        move(note, by: 1, collectionId: collectionId)
+                                    }
+                                    .disabled(!canMove(note, by: 1))
+                                    .help("Move note down")
+                                }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                                .controlSize(.small)
+
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                                     Text(displayTitle(for: note))
+                                        .font(.body)
                                         .lineLimit(1)
                                     Spacer()
                                     Text(note.modifiedAt.formatted(date: .abbreviated, time: .shortened))
@@ -1152,13 +1168,14 @@ private struct CollectionDetailView: View {
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(.rect)
-                                .onTapGesture {
-                                    if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
-                                    select(note, editing: false)
-                                }
-                                .onTapGesture(count: 2) {
-                                    if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
-                                    select(note, editing: true)
+                                .background {
+                                    NoteClickListener {
+                                        if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
+                                        select(note, editing: false)
+                                    } onDoubleClick: {
+                                        if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
+                                        select(note, editing: true)
+                                    }
                                 }
 
                                 Button("Edit", systemImage: "pencil") {
@@ -1186,41 +1203,7 @@ private struct CollectionDetailView: View {
                                 }
                             }
                             .contentShape(.rect)
-                            .opacity(note.id == draggingNoteId ? 0 : 1)
-                            .onDrag {
-                                draggingNoteId = note.id
-                                return NSItemProvider(object: String(note.id ?? -1) as NSString)
-                            }
-                            .onDrop(
-                                of: [.text],
-                                delegate: CollectionNoteDropDelegate(
-                                    note: note,
-                                    notes: $notes,
-                                    draggingNoteId: $draggingNoteId
-                                ) { orderedIds, selectedId in
-                                    persistNoteOrder(
-                                        orderedIds, collectionId: collectionId, selecting: selectedId)
-                                }
-                            )
                         }
-                    }
-                    .onDrop(
-                        of: [.text],
-                        isTargeted: Binding(
-                            get: { draggingNoteId != nil },
-                            set: { targeted in
-                                if !targeted {
-                                    draggingNoteId = nil
-                                }
-                            }
-                        )
-                    ) { _ in
-                        persistNoteOrder(
-                            notes.compactMap(\.id),
-                            collectionId: collectionId,
-                            selecting: draggingNoteId)
-                        draggingNoteId = nil
-                        return true
                     }
                 }
 
@@ -1356,6 +1339,25 @@ private struct CollectionDetailView: View {
         loadNotes(collectionId: collectionId, selecting: selectedId)
     }
 
+    private func canMove(_ note: CollectionNote, by offset: Int) -> Bool {
+        guard let index = notes.firstIndex(where: { $0.id == note.id }) else { return false }
+        return notes.indices.contains(index + offset)
+    }
+
+    private func move(_ note: CollectionNote, by offset: Int, collectionId: Int64) {
+        let selectedId = note.id
+        if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
+        guard
+            let selectedId,
+            let index = notes.firstIndex(where: { $0.id == selectedId })
+        else { return }
+
+        let destination = index + offset
+        guard notes.indices.contains(destination) else { return }
+        notes.swapAt(index, destination)
+        persistNoteOrder(notes.compactMap(\.id), collectionId: collectionId, selecting: selectedId)
+    }
+
     private func displayTitle(for note: CollectionNote) -> String {
         let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty { return title }
@@ -1368,37 +1370,69 @@ private struct CollectionDetailView: View {
     }
 }
 
-private struct CollectionNoteDropDelegate: DropDelegate {
-    let note: CollectionNote
-    @Binding var notes: [CollectionNote]
-    @Binding var draggingNoteId: Int64?
-    let onDrop: ([Int64], Int64?) -> Void
+private struct NoteClickListener: NSViewRepresentable {
+    let onClick: () -> Void
+    let onDoubleClick: () -> Void
 
-    func dropEntered(info: DropInfo) {
-        guard
-            let draggingNoteId,
-            note.id != draggingNoteId,
-            let from = notes.firstIndex(where: { $0.id == draggingNoteId }),
-            let to = notes.firstIndex(where: { $0.id == note.id })
-        else { return }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onClick: onClick, onDoubleClick: onDoubleClick)
+    }
 
-        withAnimation(.default) {
-            notes.move(
-                fromOffsets: IndexSet(integer: from),
-                toOffset: to > from ? to + 1 : to
-            )
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.view = view
+        context.coordinator.installMonitor()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.view = nsView
+        context.coordinator.onClick = onClick
+        context.coordinator.onDoubleClick = onDoubleClick
+        context.coordinator.installMonitor()
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.removeMonitor()
+    }
+
+    final class Coordinator {
+        weak var view: NSView?
+        var onClick: () -> Void
+        var onDoubleClick: () -> Void
+        private var monitor: Any?
+
+        init(onClick: @escaping () -> Void, onDoubleClick: @escaping () -> Void) {
+            self.onClick = onClick
+            self.onDoubleClick = onDoubleClick
         }
-    }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
+        func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                self?.handle(event)
+                return event
+            }
+        }
 
-    func performDrop(info: DropInfo) -> Bool {
-        let selectedId = draggingNoteId
-        draggingNoteId = nil
-        onDrop(notes.compactMap(\.id), selectedId)
-        return true
+        func removeMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
+
+        private func handle(_ event: NSEvent) {
+            guard let view, event.window === view.window else { return }
+            let location = view.convert(event.locationInWindow, from: nil)
+            guard view.bounds.contains(location) else { return }
+
+            if event.clickCount == 2 {
+                onDoubleClick()
+            } else if event.clickCount == 1 {
+                onClick()
+            }
+        }
     }
 }
 
