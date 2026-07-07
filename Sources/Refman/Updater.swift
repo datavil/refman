@@ -16,8 +16,8 @@ final class Updater {
         case checking
         case upToDate
         case available(version: String)
-        /// Fetching the zip; `fraction` is 0...1, or nil while the size is unknown.
-        case downloading(fraction: Double?)
+        /// Fetching the zip; `fraction` is 0...1.
+        case downloading(fraction: Double)
         /// Extracting the downloaded zip — no granular progress available.
         case unpacking
         case failed(String)
@@ -51,9 +51,11 @@ final class Updater {
         let assets: [Asset]
         struct Asset: Decodable {
             let name: String
+            let size: Int64
             let browserDownloadURL: String
             enum CodingKeys: String, CodingKey {
                 case name
+                case size
                 case browserDownloadURL = "browser_download_url"
             }
         }
@@ -64,7 +66,7 @@ final class Updater {
         }
     }
 
-    private var latest: (version: String, zipURL: URL, page: URL)?
+    private var latest: (version: String, zipURL: URL, zipSize: Int64, page: URL)?
 
     private static let lastCheckKey = "lastUpdateCheck"
 
@@ -91,7 +93,7 @@ final class Updater {
                     let zipURL = URL(string: zip.browserDownloadURL),
                     let page = URL(string: release.htmlURL)
                 {
-                    latest = (latestVersion, zipURL, page)
+                    latest = (latestVersion, zipURL, zip.size, page)
                     status = .available(version: latestVersion)
                     if userInitiated { promptInstall(version: latestVersion, page: page) }
                 } else {
@@ -119,10 +121,11 @@ final class Updater {
             NSWorkspace.shared.open(latest.page)
             return
         }
-        status = .downloading(fraction: nil)
+        status = .downloading(fraction: 0)
         Task {
             do {
-                try await downloadAndSwap(zipURL: latest.zipURL, target: target)
+                try await downloadAndSwap(
+                    zipURL: latest.zipURL, expectedBytes: latest.zipSize, target: target)
                 // downloadAndSwap relaunches via a helper, so terminate here.
                 NSApp.terminate(nil)
             } catch {
@@ -147,8 +150,8 @@ final class Updater {
         return try JSONDecoder().decode(Release.self, from: data)
     }
 
-    private func downloadAndSwap(zipURL: URL, target: URL) async throws {
-        let downloaded = try await download(zipURL)
+    private func downloadAndSwap(zipURL: URL, expectedBytes: Int64, target: URL) async throws {
+        let downloaded = try await download(zipURL, expectedBytes: expectedBytes)
         // Unpack immediately — the temporary download is short-lived.
         status = .unpacking
         let stage = FileManager.default.temporaryDirectory
@@ -166,8 +169,8 @@ final class Updater {
     /// Downloads `url`, reporting progress onto `status`, and returns a stable
     /// file URL. Uses a session-scoped delegate because the per-task delegate of
     /// `download(from:delegate:)` does not receive `didWriteData` callbacks.
-    private func download(_ url: URL) async throws -> URL {
-        let delegate = DownloadProgressDelegate { [weak self] fraction in
+    private func download(_ url: URL, expectedBytes: Int64) async throws -> URL {
+        let delegate = DownloadProgressDelegate(expectedBytes: expectedBytes) { [weak self] fraction in
             Task { @MainActor in self?.status = .downloading(fraction: fraction) }
         }
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
@@ -268,10 +271,12 @@ final class Updater {
 private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate,
     @unchecked Sendable
 {
+    private let expectedBytes: Int64
     private let onProgress: @Sendable (Double) -> Void
     var continuation: CheckedContinuation<URL, Error>?
 
-    init(onProgress: @escaping @Sendable (Double) -> Void) {
+    init(expectedBytes: Int64, onProgress: @escaping @Sendable (Double) -> Void) {
+        self.expectedBytes = expectedBytes
         self.onProgress = onProgress
     }
 
@@ -280,8 +285,10 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
         didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+        let totalBytes = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : expectedBytes
+        guard totalBytes > 0 else { return }
+        let fraction = Double(totalBytesWritten) / Double(totalBytes)
+        onProgress(min(max(fraction, 0), 1))
     }
 
     func urlSession(
@@ -289,6 +296,7 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
         didFinishDownloadingTo location: URL
     ) {
         // The system reclaims `location` once this returns, so move it out first.
+        onProgress(1)
         let stable = FileManager.default.temporaryDirectory
             .appendingPathComponent("RefmanDownload-\(UUID().uuidString).zip")
         do {

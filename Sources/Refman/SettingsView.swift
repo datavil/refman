@@ -404,7 +404,6 @@ struct UpdatesSettingsSection: View {
         case .upToDate: return "Up to date"
         case .available(let version): return "\(version) available"
         case .downloading(let fraction):
-            guard let fraction else { return "Downloading…" }
             return "Downloading… \(fraction.formatted(.percent.precision(.fractionLength(0))))"
         case .unpacking: return "Installing…"
         case .failed(let message): return message
