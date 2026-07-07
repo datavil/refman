@@ -532,6 +532,58 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    public func collectionNotes(in collectionId: Int64) throws -> [CollectionNote] {
+        try dbWriter.read { db in
+            try CollectionNote
+                .filter(Column("collectionId") == collectionId)
+                .order(Column("sortOrder"), Column("modifiedAt").desc)
+                .fetchAll(db)
+        }
+    }
+
+    @discardableResult
+    public func createCollectionNote(
+        collectionId: Int64, title: String = "", body: String = ""
+    ) throws -> CollectionNote {
+        try dbWriter.write { db in
+            let next = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COALESCE(MAX(sortOrder), -1) + 1 FROM collectionNote
+                    WHERE collectionId = ?
+                    """,
+                arguments: [collectionId]) ?? 0
+            var note = CollectionNote(
+                collectionId: collectionId, title: title, body: body, sortOrder: next)
+            try note.insert(db)
+            return note
+        }
+    }
+
+    @discardableResult
+    public func updateCollectionNote(_ note: CollectionNote) throws -> CollectionNote {
+        try dbWriter.write { db in
+            var saved = note
+            saved.modifiedAt = Date()
+            try saved.update(db)
+            return saved
+        }
+    }
+
+    public func deleteCollectionNote(id: Int64) throws {
+        _ = try dbWriter.write { db in try CollectionNote.deleteOne(db, key: id) }
+    }
+
+    public func reorderCollectionNotes(_ orderedIds: [Int64]) throws {
+        try dbWriter.write { db in
+            for (index, id) in orderedIds.enumerated() {
+                try db.execute(
+                    sql: "UPDATE collectionNote SET sortOrder = ? WHERE id = ?",
+                    arguments: [index, id])
+            }
+        }
+    }
+
     public func setCollectionIcon(id: Int64, to icon: String?) throws {
         try dbWriter.write { db in
             try db.execute(

@@ -280,6 +280,68 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v13") { db in
+            // User-authored Markdown notes for a collection.
+            try db.alter(table: "collection") { t in
+                t.add(column: "notes", .text)
+            }
+        }
+
+        migrator.registerMigration("v14") { db in
+            // Multiple user-authored Markdown notes per collection. Existing
+            // v13 single-note text is preserved as the first note.
+            try db.create(table: "collectionNote") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("uuid", .text).notNull().unique()
+                t.belongsTo("collection", onDelete: .cascade).notNull()
+                t.column("title", .text).notNull().defaults(to: "")
+                t.column("body", .text).notNull().defaults(to: "")
+                t.column("sortOrder", .integer).notNull().defaults(to: 0)
+                t.column("createdAt", .datetime).notNull()
+                t.column("modifiedAt", .datetime).notNull()
+            }
+
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, notes FROM collection
+                    WHERE notes IS NOT NULL AND notes != ''
+                    """)
+            for row in rows {
+                var note = CollectionNote(
+                    collectionId: row["id"],
+                    title: "Notes",
+                    body: row["notes"])
+                try note.insert(db)
+            }
+        }
+
+        migrator.registerMigration("v15") { db in
+            // Manual note ordering within each collection.
+            if try !db.columns(in: "collectionNote").contains(where: { $0.name == "sortOrder" }) {
+                try db.alter(table: "collectionNote") { t in
+                    t.add(column: "sortOrder", .integer).notNull().defaults(to: 0)
+                }
+            }
+            let collectionIds = try Int64.fetchAll(
+                db, sql: "SELECT DISTINCT collectionId FROM collectionNote")
+            for collectionId in collectionIds {
+                let noteIds = try Int64.fetchAll(
+                    db,
+                    sql: """
+                        SELECT id FROM collectionNote
+                        WHERE collectionId = ?
+                        ORDER BY modifiedAt DESC, createdAt DESC
+                        """,
+                    arguments: [collectionId])
+                for (index, noteId) in noteIds.enumerated() {
+                    try db.execute(
+                        sql: "UPDATE collectionNote SET sortOrder = ? WHERE id = ?",
+                        arguments: [index, noteId])
+                }
+            }
+        }
+
         return migrator
     }
 }

@@ -189,6 +189,28 @@ import Testing
         #expect(kids.map(\.name) == ["Y", "X"])
     }
 
+    @Test func collectionNotesPersistUpdateAndCascade() throws {
+        let repo = try makeRepo()
+        let collection = try repo.createCollection(name: "Notes")
+
+        var first = try repo.createCollectionNote(
+            collectionId: collection.id!, title: "Reading Plan", body: "# Start")
+        let second = try repo.createCollectionNote(
+            collectionId: collection.id!, title: "Questions", body: "- Why?")
+        #expect(try repo.collectionNotes(in: collection.id!).count == 2)
+        #expect(try repo.collectionNotes(in: collection.id!).map(\.id) == [first.id, second.id])
+
+        first.body = "# Start\n- Follow up"
+        try repo.updateCollectionNote(first)
+        #expect(try repo.collectionNotes(in: collection.id!).contains { $0.body.contains("Follow up") })
+
+        try repo.reorderCollectionNotes([second.id!, first.id!])
+        #expect(try repo.collectionNotes(in: collection.id!).map(\.id) == [second.id, first.id])
+
+        try repo.deleteCollection(id: collection.id!)
+        #expect(try repo.collectionNotes(in: collection.id!).isEmpty)
+    }
+
     @Test func tagsRoundTripAndOrphanCleanup() throws {
         let repo = try makeRepo()
         let doc = try repo.insert(Document(title: "Tagged"))

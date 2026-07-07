@@ -865,6 +865,49 @@ final class AppModel {
         }
     }
 
+    func notes(inCollection id: Int64) -> [CollectionNote] {
+        do {
+            return try repository.collectionNotes(in: id)
+        } catch {
+            statusMessage = "Could not load notes: \(error.localizedDescription)"
+            return []
+        }
+    }
+
+    func createNote(inCollection id: Int64) -> CollectionNote? {
+        do {
+            return try repository.createCollectionNote(collectionId: id)
+        } catch {
+            statusMessage = "Could not create note: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func update(_ note: CollectionNote) -> CollectionNote? {
+        do {
+            return try repository.updateCollectionNote(note)
+        } catch {
+            statusMessage = "Could not save notes: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func deleteNote(id: Int64) {
+        do {
+            try repository.deleteCollectionNote(id: id)
+        } catch {
+            statusMessage = "Could not delete note: \(error.localizedDescription)"
+        }
+    }
+
+    func reorderNotes(_ orderedIds: [Int64]) {
+        do {
+            try repository.reorderCollectionNotes(orderedIds)
+        } catch {
+            statusMessage = "Could not reorder notes: \(error.localizedDescription)"
+        }
+    }
+
     func addTag(_ name: String) {
         guard let id = selectedDocumentId, !name.isEmpty else { return }
         _ = try? repository.addTag(name, toDocument: id)

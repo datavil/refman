@@ -172,6 +172,42 @@ public struct Collection: Identifiable, Equatable, Hashable, Codable,
     public mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }
 }
 
+public struct CollectionNote: Identifiable, Equatable, Hashable, Codable,
+    FetchableRecord, MutablePersistableRecord, Sendable
+{
+    public var id: Int64?
+    public var uuid: String
+    public var collectionId: Int64
+    public var title: String
+    public var body: String
+    public var sortOrder: Int
+    public var createdAt: Date
+    public var modifiedAt: Date
+
+    public init(
+        id: Int64? = nil,
+        uuid: String = UUID().uuidString,
+        collectionId: Int64,
+        title: String = "",
+        body: String = "",
+        sortOrder: Int = 0,
+        createdAt: Date = Date(),
+        modifiedAt: Date = Date()
+    ) {
+        self.id = id
+        self.uuid = uuid
+        self.collectionId = collectionId
+        self.title = title
+        self.body = body
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
+    }
+
+    public static let databaseTableName = "collectionNote"
+    public mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }
+}
+
 public struct CollectionDocument: Codable, FetchableRecord, PersistableRecord, Sendable {
     public var collectionId: Int64
     public var documentId: Int64

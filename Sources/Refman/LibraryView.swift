@@ -169,7 +169,7 @@ struct LibraryView: View {
         }
         .onChange(of: model.addRequested) { showingAddPopover = true }
         .onChange(of: model.paletteRequested) { showingPalette = true }
-        .onChange(of: model.aiSettingsRequested) { openWindow(id: "ai-settings") }
+        .onChange(of: model.aiSettingsRequested) { openAISettings() }
         .onChange(of: model.settingsRequested) { openSettings() }
         .sheet(isPresented: $showingPalette) {
             CommandPalette(isPresented: $showingPalette)
@@ -433,7 +433,24 @@ struct LibraryView: View {
             SidebarFooter(
                 updater: model.updater,
                 openSettings: { openSettings() },
-                openAISettings: { openWindow(id: "ai-settings") })
+                openAISettings: openAISettings)
+        }
+    }
+
+    private func openAISettings() {
+        let existingWindowNumbers = Set(NSApp.windows.map(\.windowNumber))
+        openWindow(id: "ai-settings")
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard
+                let window = NSApp.windows.first(where: {
+                    !existingWindowNumbers.contains($0.windowNumber) && $0.canBecomeKey
+                })
+            else { return }
+
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -951,6 +968,26 @@ private struct SidebarFooter: View {
 private struct CollectionDetailView: View {
     @Environment(AppModel.self) private var model
     let collection: RefmanCore.Collection
+    @State private var selectedTab = CollectionDetailTab.summary
+    @State private var notes: [CollectionNote] = []
+    @State private var selectedNoteId: Int64?
+    @State private var noteTitleDraft = ""
+    @State private var noteBodyDraft = ""
+    @State private var isEditingNote = false
+    @State private var noteToDelete: CollectionNote?
+    @State private var draggingNoteId: Int64?
+
+    init(collection: RefmanCore.Collection) {
+        self.collection = collection
+    }
+
+    private enum CollectionDetailTab {
+        case summary, notes
+    }
+
+    private var selectedNote: CollectionNote? {
+        notes.first { $0.id == selectedNoteId }
+    }
 
     var body: some View {
         let id = collection.id ?? -1
@@ -979,52 +1016,61 @@ private struct CollectionDetailView: View {
 
                     Spacer()
 
-                    if hasSummary, !generating {
-                        Button("Refresh", systemImage: "aqi.medium") {
-                            model.summarizeCollection(id: id)
-                        }
-                        .buttonStyle(.bordered)
-                    }
+                    toolbarActions(collectionId: id, hasSummary: hasSummary, generating: generating)
                 }
+
+                Picker("Collection Detail", selection: $selectedTab) {
+                    Text("Summary").tag(CollectionDetailTab.summary)
+                    Text("Notes").tag(CollectionDetailTab.notes)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
 
                 Divider()
 
-                if generating {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Synthesizing \(documentCount) paper\(documentCount == 1 ? "" : "s")…")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 48)
-                } else if let summary, !summary.isEmpty {
-                    MarkdownText(text: summary)
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-
-                    if let updated = collection.summaryUpdatedAt {
-                        Label(
-                            "Updated \(updated.formatted(date: .abbreviated, time: .shortened))",
-                            systemImage: "clock"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Collection summary")
-                            .font(.headline)
-                        Text(
-                            "Create a concise synthesis of the shared themes, methods, and findings across this collection."
-                        )
-                        .foregroundStyle(.secondary)
-
-                        Button("Generate Summary", systemImage: "aqi.medium") {
-                            model.summarizeCollection(id: id)
+                switch selectedTab {
+                case .summary:
+                    if generating {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Synthesizing \(documentCount) paper\(documentCount == 1 ? "" : "s")…")
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(documentCount == 0)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 48)
+                    } else if let summary, !summary.isEmpty {
+                        MarkdownText(text: summary)
+                            .lineSpacing(4)
+                            .textSelection(.enabled)
+
+                        if let updated = collection.summaryUpdatedAt {
+                            Label(
+                                "Updated \(updated.formatted(date: .abbreviated, time: .shortened))",
+                                systemImage: "clock"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Collection summary")
+                                .font(.headline)
+                            Text(
+                                "Create a concise synthesis of the shared themes, methods, and findings across this collection."
+                            )
+                            .foregroundStyle(.secondary)
+
+                            Button("Generate Summary", systemImage: "aqi.medium") {
+                                model.summarizeCollection(id: id)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(documentCount == 0)
+                        }
                     }
+
+                case .notes:
+                    notesView(collectionId: id)
                 }
             }
             .frame(maxWidth: 720, alignment: .leading)
@@ -1032,6 +1078,327 @@ private struct CollectionDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(collection.name)
+        .task(id: id) { loadNotes(collectionId: id) }
+        .onDisappear {
+            if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
+        }
+        .confirmationDialog(
+            "Delete “\(noteToDelete.map(displayTitle(for:)) ?? "Note")”?",
+            isPresented: Binding(
+                get: { noteToDelete != nil },
+                set: { if !$0 { noteToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Note", role: .destructive) {
+                if let noteToDelete {
+                    delete(noteToDelete, collectionId: id)
+                }
+                noteToDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                noteToDelete = nil
+            }
+        } message: {
+            Text("This note will be permanently deleted.")
+        }
+    }
+
+    @ViewBuilder
+    private func toolbarActions(
+        collectionId: Int64, hasSummary: Bool, generating: Bool
+    ) -> some View {
+        if selectedTab == .summary, hasSummary, !generating {
+            Button("Refresh", systemImage: "aqi.medium") {
+                model.summarizeCollection(id: collectionId)
+            }
+            .buttonStyle(.bordered)
+        } else if selectedTab == .notes {
+            Button("New Note", systemImage: "plus") {
+                createNote(collectionId: collectionId)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private func notesView(collectionId: Int64) -> some View {
+        if notes.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("No notes yet.")
+                    .foregroundStyle(.secondary)
+                Button("New Note", systemImage: "square.and.pencil") {
+                    createNote(collectionId: collectionId)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Notes")
+                        .font(.headline)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(notes) { note in
+                            HStack(spacing: 8) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(displayTitle(for: note))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(note.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                                .onTapGesture {
+                                    if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
+                                    select(note, editing: false)
+                                }
+                                .onTapGesture(count: 2) {
+                                    if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
+                                    select(note, editing: true)
+                                }
+
+                                Button("Edit", systemImage: "pencil") {
+                                    if isEditingNote { saveSelectedNote(renderAfterSaving: false) }
+                                    select(note, editing: true)
+                                }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                                .help("Edit note")
+
+                                Button("Delete", systemImage: "trash", role: .destructive) {
+                                    noteToDelete = note
+                                }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                                .help("Delete note")
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background {
+                                if note.id == selectedNoteId {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(.quaternary)
+                                }
+                            }
+                            .contentShape(.rect)
+                            .opacity(note.id == draggingNoteId ? 0 : 1)
+                            .onDrag {
+                                draggingNoteId = note.id
+                                return NSItemProvider(object: String(note.id ?? -1) as NSString)
+                            }
+                            .onDrop(
+                                of: [.text],
+                                delegate: CollectionNoteDropDelegate(
+                                    note: note,
+                                    notes: $notes,
+                                    draggingNoteId: $draggingNoteId
+                                ) { orderedIds, selectedId in
+                                    persistNoteOrder(
+                                        orderedIds, collectionId: collectionId, selecting: selectedId)
+                                }
+                            )
+                        }
+                    }
+                    .onDrop(
+                        of: [.text],
+                        isTargeted: Binding(
+                            get: { draggingNoteId != nil },
+                            set: { targeted in
+                                if !targeted {
+                                    draggingNoteId = nil
+                                }
+                            }
+                        )
+                    ) { _ in
+                        persistNoteOrder(
+                            notes.compactMap(\.id),
+                            collectionId: collectionId,
+                            selecting: draggingNoteId)
+                        draggingNoteId = nil
+                        return true
+                    }
+                }
+
+                Divider()
+
+                selectedNoteView()
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .frame(minHeight: 420, alignment: .topLeading)
+        }
+    }
+
+    @ViewBuilder
+    private func selectedNoteView() -> some View {
+        if let note = selectedNote {
+            if isEditingNote {
+                VStack(alignment: .leading, spacing: 12) {
+                    TextField("Title", text: $noteTitleDraft)
+                        .textFieldStyle(.roundedBorder)
+
+                    ZStack(alignment: .topLeading) {
+                        MarkdownEditor(text: $noteBodyDraft)
+                        if noteBodyDraft.isEmpty {
+                            Text("Start writing notes…")
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(minHeight: 360)
+                    .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(.quaternary)
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Save", systemImage: "checkmark") {
+                            saveSelectedNote(renderAfterSaving: true)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut("s", modifiers: [.command])
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(displayTitle(for: note))
+                            .font(.title3)
+                            .bold()
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Label(
+                            "Updated \(note.modifiedAt.formatted(date: .abbreviated, time: .shortened))",
+                            systemImage: "clock"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    if note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("No content yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        MarkdownText(text: note.body)
+                            .lineSpacing(4)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        } else {
+            Text("Select a note.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func loadNotes(collectionId: Int64, selecting id: Int64? = nil) {
+        notes = model.notes(inCollection: collectionId)
+        let target = id ?? selectedNoteId
+        if let target, notes.contains(where: { $0.id == target }) {
+            selectedNoteId = target
+        } else {
+            selectedNoteId = notes.first?.id
+        }
+
+        if let note = selectedNote, !isEditingNote {
+            noteTitleDraft = note.title
+            noteBodyDraft = note.body
+        }
+    }
+
+    private func createNote(collectionId: Int64) {
+        guard let note = model.createNote(inCollection: collectionId) else { return }
+        loadNotes(collectionId: collectionId, selecting: note.id)
+        if let selectedNote { select(selectedNote, editing: true) }
+    }
+
+    private func select(_ note: CollectionNote, editing: Bool) {
+        selectedNoteId = note.id
+        noteTitleDraft = note.title
+        noteBodyDraft = note.body
+        isEditingNote = editing
+    }
+
+    private func saveSelectedNote(renderAfterSaving: Bool) {
+        guard var note = selectedNote else { return }
+        note.title = noteTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        note.body = noteBodyDraft
+        guard let saved = model.update(note) else { return }
+        if let index = notes.firstIndex(where: { $0.id == saved.id }) {
+            notes[index] = saved
+        }
+        loadNotes(collectionId: saved.collectionId, selecting: saved.id)
+        isEditingNote = !renderAfterSaving
+    }
+
+    private func delete(_ note: CollectionNote, collectionId: Int64) {
+        guard let id = note.id else { return }
+        model.deleteNote(id: id)
+        if selectedNoteId == id {
+            selectedNoteId = nil
+            isEditingNote = false
+        }
+        loadNotes(collectionId: collectionId)
+    }
+
+    private func persistNoteOrder(
+        _ orderedIds: [Int64], collectionId: Int64, selecting selectedId: Int64?
+    ) {
+        model.reorderNotes(orderedIds)
+        loadNotes(collectionId: collectionId, selecting: selectedId)
+    }
+
+    private func displayTitle(for note: CollectionNote) -> String {
+        let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        let firstBodyLine = note.body
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+        let headingText = firstBodyLine.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        return headingText.isEmpty ? "Untitled Note" : headingText
+    }
+}
+
+private struct CollectionNoteDropDelegate: DropDelegate {
+    let note: CollectionNote
+    @Binding var notes: [CollectionNote]
+    @Binding var draggingNoteId: Int64?
+    let onDrop: ([Int64], Int64?) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard
+            let draggingNoteId,
+            note.id != draggingNoteId,
+            let from = notes.firstIndex(where: { $0.id == draggingNoteId }),
+            let to = notes.firstIndex(where: { $0.id == note.id })
+        else { return }
+
+        withAnimation(.default) {
+            notes.move(
+                fromOffsets: IndexSet(integer: from),
+                toOffset: to > from ? to + 1 : to
+            )
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let selectedId = draggingNoteId
+        draggingNoteId = nil
+        onDrop(notes.compactMap(\.id), selectedId)
+        return true
     }
 }
 
