@@ -22,8 +22,11 @@ public struct DocumentDetails: Identifiable, Equatable, Hashable, Sendable {
 
     // Non-optional keys for table sorting.
     public var sortTitle: String { document.title }
+    public var sortAuthors: String { authorsText }
     public var sortYear: Int { document.year ?? 0 }
     public var sortVenue: String { document.venue ?? "" }
+    public var sortAddedAt: Date { document.addedAt }
+    public var sortModifiedAt: Date { document.modifiedAt }
 }
 
 /// The library section that constrains a full-text search.

@@ -21,6 +21,8 @@ struct LibraryView: View {
     @State private var previewURL: URL?
     @State private var showingAddPopover = false
     @State private var identifierText = ""
+    @State private var sortField = DocumentSortField.title
+    @State private var sortDirection = SortOrder.forward
     @State private var sortOrder = [KeyPathComparator(\DocumentDetails.sortTitle)]
     @State private var columnCustomization = TableColumnCustomization<DocumentDetails>()
     @State private var showingImportReport = false
@@ -66,6 +68,30 @@ struct LibraryView: View {
     }()
 
     private final class BundleToken {}
+
+    private enum DocumentSortField: String, CaseIterable, Identifiable {
+        case title, authors, year, venue, added, modified
+
+        var id: Self { self }
+
+        var label: String {
+            switch self {
+            case .title: "Title"
+            case .authors: "Authors"
+            case .year: "Year"
+            case .venue: "Venue"
+            case .added: "Added"
+            case .modified: "Modified"
+            }
+        }
+
+        var defaultDirection: SortOrder {
+            switch self {
+            case .year, .added, .modified: .reverse
+            default: .forward
+            }
+        }
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -179,6 +205,9 @@ struct LibraryView: View {
                 }
             }
             ToolbarItem {
+                sortMenu
+            }
+            ToolbarItem {
                 if let progress = model.importProgress {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
@@ -216,6 +245,69 @@ struct LibraryView: View {
     /// The last import had something worth reporting (a duplicate or failure).
     private var hasImportReport: Bool {
         model.importLog.contains { $0.status != .imported }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Section("Sort By") {
+                ForEach(DocumentSortField.allCases) { field in
+                    Button {
+                        sortField = field
+                        sortDirection = field.defaultDirection
+                        applySort()
+                    } label: {
+                        if sortField == field {
+                            Label(field.label, systemImage: "checkmark")
+                        } else {
+                            Text(field.label)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Section("Direction") {
+                Button {
+                    sortDirection = .forward
+                    applySort()
+                } label: {
+                    if sortDirection == .forward {
+                        Label("Ascending", systemImage: "checkmark")
+                    } else {
+                        Text("Ascending")
+                    }
+                }
+                Button {
+                    sortDirection = .reverse
+                    applySort()
+                } label: {
+                    if sortDirection == .reverse {
+                        Label("Descending", systemImage: "checkmark")
+                    } else {
+                        Text("Descending")
+                    }
+                }
+            }
+        } label: {
+            Label("Sort By", systemImage: "arrow.up.arrow.down")
+        }
+        .help("Sort documents")
+    }
+
+    private func applySort() {
+        switch sortField {
+        case .title:
+            sortOrder = [KeyPathComparator(\DocumentDetails.sortTitle, order: sortDirection)]
+        case .authors:
+            sortOrder = [KeyPathComparator(\DocumentDetails.sortAuthors, order: sortDirection)]
+        case .year:
+            sortOrder = [KeyPathComparator(\DocumentDetails.sortYear, order: sortDirection)]
+        case .venue:
+            sortOrder = [KeyPathComparator(\DocumentDetails.sortVenue, order: sortDirection)]
+        case .added:
+            sortOrder = [KeyPathComparator(\DocumentDetails.sortAddedAt, order: sortDirection)]
+        case .modified:
+            sortOrder = [KeyPathComparator(\DocumentDetails.sortModifiedAt, order: sortDirection)]
+        }
     }
 
     private var sidebar: some View {
