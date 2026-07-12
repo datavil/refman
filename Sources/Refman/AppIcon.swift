@@ -64,16 +64,12 @@ enum AppIcon {
     private static func draw() {
         // Background squircle, inset to the standard macOS icon grid so it
         // matches the size of neighbouring Dock icons (~10% padding).
-        let bg = NSBezierPath(
-            roundedRect: NSRect(x: 100, y: 100, width: 824, height: 824),
-            xRadius: 184, yRadius: 184)
+        let bg = squirclePath(in: NSRect(x: 100, y: 100, width: 824, height: 824))
         NSColor(srgbRed: 0.984, green: 0.984, blue: 0.976, alpha: 1).setFill()
         bg.fill()
 
         // Hairline border.
-        let border = NSBezierPath(
-            roundedRect: NSRect(x: 100.5, y: 100.5, width: 823, height: 823),
-            xRadius: 184, yRadius: 184)
+        let border = squirclePath(in: NSRect(x: 100.5, y: 100.5, width: 823, height: 823))
         ink.withAlphaComponent(0.10).setStroke()
         border.lineWidth = 1
         border.stroke()
@@ -89,6 +85,30 @@ enum AppIcon {
         transform.concat()
 
         drawGraph()
+    }
+
+    /// A true superellipse rather than a rounded rectangle, matching the
+    /// continuous-corner silhouette used by Apple app icons.
+    private static func squirclePath(in rect: NSRect) -> NSBezierPath {
+        let path = NSBezierPath()
+        let exponent = 2.0 / 5.0
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        let radiusX = rect.width / 2
+        let radiusY = rect.height / 2
+
+        for index in 0...256 {
+            let angle = Double(index) / 256 * 2 * Double.pi
+            let cosine = cos(angle)
+            let sine = sin(angle)
+            let x = copysign(pow(abs(cosine), exponent), cosine)
+            let y = copysign(pow(abs(sine), exponent), sine)
+            let point = NSPoint(
+                x: center.x + radiusX * CGFloat(x),
+                y: center.y + radiusY * CGFloat(y))
+            if index == 0 { path.move(to: point) } else { path.line(to: point) }
+        }
+        path.close()
+        return path
     }
 
     /// The node-and-edges graph in group space (a 200x200 box around the hub).

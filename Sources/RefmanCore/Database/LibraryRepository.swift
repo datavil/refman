@@ -152,6 +152,19 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    public func document(uuid: String) throws -> DocumentDetails? {
+        try dbWriter.read { db in
+            guard let doc = try Document.filter(Column("uuid") == uuid).fetchOne(db),
+                let id = doc.id
+            else { return nil }
+            return DocumentDetails(
+                document: doc,
+                authors: try Self.fetchAuthors(db, documentId: id),
+                tags: try Self.fetchTags(db, documentId: id)
+            )
+        }
+    }
+
     /// A *live* (non-trashed) document with this DOI, if any. Trashed rows are
     /// ignored so a paper in the Trash doesn't block re-adding it by DOI.
     public func document(doi: String) throws -> Document? {

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Refman logo">
+  <path d="M330 64H694C858 64 960 166 960 330V694C960 858 858 960 694 960H330C166 960 64 858 64 694V330C64 166 166 64 330 64Z"
+        fill="#fbfbf9" stroke="#1a1a1a" stroke-opacity=".14" stroke-width="2"/>
+  <g stroke="#1a1a1a" stroke-width="35.84" stroke-linecap="round">
+    <line x1="512" y1="512" x2="317.44" y2="317.44"/>
+    <line x1="512" y1="512" x2="747.52" y2="378.88"/>
+    <line x1="512" y1="512" x2="399.36" y2="747.52"/>
+  </g>
+  <g fill="#1a1a1a">
+    <circle cx="512" cy="512" r="81.92"/>
+    <circle cx="317.44" cy="317.44" r="51.2"/>
+    <circle cx="747.52" cy="378.88" r="51.2"/>
+    <circle cx="399.36" cy="747.52" r="51.2"/>
+  </g>
+</svg>

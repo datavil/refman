@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Refman Extension Settings</title>
+  </head>
+  <body class="options">
+    <main>
+      <header>
+        <img src="/icons/icon128.png" alt="" />
+        <div><strong>Refman Extension</strong><span>Settings</span></div>
+      </header>
+      <section class="card">
+        <h1>Connection</h1>
+        <p id="connection">Checking Refman…</p>
+        <form id="pair-form">
+          <label for="pair-code">Pairing code</label>
+          <div id="pair-code" class="pair-code-fields" role="group" aria-label="Six-digit pairing code">
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 1" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 2" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 3" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 4" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 5" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 6" required />
+          </div>
+          <button type="submit">Pair Extension</button>
+        </form>
+        <p class="secondary">Press ⌘P in Refman to generate a new pairing code.</p>
+      </section>
+      <section class="card">
+        <h1>How it works</h1>
+        <p>Refman reads scholarly metadata from the active tab and sends it directly to the Refman app on this Mac. It does not use a cloud service.</p>
+      </section>
+      <p id="status" class="status" role="status"></p>
+    </main>
+    <script type="module" src="/src/options.ts"></script>
+  </body>
+</html>

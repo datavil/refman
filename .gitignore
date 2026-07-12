@@ -2,5 +2,8 @@
 .swiftpm/
 DerivedData/
 dist/
+node_modules/
+extension/*.zip
+extension/refman-chrome-extension/
 *.xcodeproj
 .DS_Store

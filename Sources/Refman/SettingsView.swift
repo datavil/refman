@@ -225,6 +225,8 @@ struct SettingsView: View {
 
                 UpdatesSettingsSection(updater: model.updater)
 
+                BrowserExtensionSettingsSection()
+
                 Section("Metadata & Downloads") {
                     TextField(
                         "Contact email", text: $contactEmail,
@@ -263,6 +265,32 @@ struct SettingsView: View {
         }
     }
 
+}
+
+struct BrowserExtensionSettingsSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Section("Chrome Extension") {
+            if let code = model.browserBridge.pairingCode {
+                LabeledContent("Pairing code") {
+                    Text(code)
+                        .monospacedDigit()
+                        .bold()
+                        .textSelection(.enabled)
+                }
+                Text("Enter this code in the Refman extension within five minutes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button("Generate Pairing Code") {
+                model.browserBridge.createPairingCode()
+            }
+            Text("Tip: press ⌘P anywhere in Refman for quick pairing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 }
 
 /// A row of accent swatches; the selected one shows a ring.

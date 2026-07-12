@@ -26,6 +26,7 @@ struct LibraryView: View {
     @State private var columnCustomization = TableColumnCustomization<DocumentDetails>()
     @State private var showingImportReport = false
     @State private var showingPalette = false
+    @State private var showingBrowserPairing = false
     @State private var searchTask: Task<Void, Never>?
 
     private var inTrash: Bool { model.sidebarSelection == .trash }
@@ -153,6 +154,7 @@ struct LibraryView: View {
             }
         }
         .background(ToolbarConfigurator())
+        .background(MainWindowMarker())
         .background {
             // Cmd+F focuses the library search field; scoped to this window so
             // it doesn't shadow the reader's own Cmd+F find bar.
@@ -168,10 +170,14 @@ struct LibraryView: View {
         }
         .onChange(of: model.addRequested) { showingAddPopover = true }
         .onChange(of: model.paletteRequested) { showingPalette = true }
+        .onChange(of: model.browserPairingRequested) { showingBrowserPairing = true }
         .onChange(of: model.aiSettingsRequested) { openAISettings() }
         .onChange(of: model.settingsRequested) { openSettings() }
         .sheet(isPresented: $showingPalette) {
             CommandPalette(isPresented: $showingPalette)
+        }
+        .sheet(isPresented: $showingBrowserPairing) {
+            BrowserPairingView(isPresented: $showingBrowserPairing)
         }
         .sheet(isPresented: $showingImportReport) {
             ImportReportView(outcomes: model.importLog)

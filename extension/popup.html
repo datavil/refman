@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Refman</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="/icons/icon128.png" alt="" />
+        <div><strong>Refman</strong><span>Save to your library</span></div>
+        <button id="settings" class="icon-button" type="button" aria-label="Extension settings" title="Extension settings">⚙︎</button>
+      </header>
+
+      <section id="pairing" class="card hidden" aria-labelledby="pair-title">
+        <h1 id="pair-title">Connect to Refman</h1>
+        <p>Press ⌘P in Refman, then enter the pairing code here.</p>
+        <form id="pair-form">
+          <label for="pair-code">Pairing code</label>
+          <div id="pair-code" class="pair-code-fields" role="group" aria-label="Six-digit pairing code">
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 1" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 2" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 3" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 4" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 5" required />
+            <input class="pair-code-digit" inputmode="numeric" pattern="[0-9]" maxlength="1" aria-label="Digit 6" required />
+          </div>
+          <button type="submit">Pair Extension</button>
+        </form>
+      </section>
+
+      <section id="capture" class="card hidden" aria-live="polite">
+        <div class="capture-status">
+          <div class="eyebrow" id="source-type">Checking page…</div>
+          <div id="pdf-available" class="pdf-badge hidden">
+            <span aria-hidden="true">●</span> PDF available
+          </div>
+        </div>
+        <h1 id="title">Current page</h1>
+        <p id="authors" class="secondary"></p>
+        <label for="collection">Collection</label>
+        <select id="collection"><option value="">All References</option></select>
+        <button id="save" type="button">Save to Refman</button>
+      </section>
+
+      <section id="result" class="card hidden" aria-live="polite">
+        <div id="result-icon" class="result-icon" aria-hidden="true">✓</div>
+        <h1 id="result-title">Saved</h1>
+        <p id="result-message"></p>
+        <button id="open" type="button">Open in Refman</button>
+      </section>
+
+      <p id="status" class="status" role="status">Connecting to Refman…</p>
+    </main>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>

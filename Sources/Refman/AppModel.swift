@@ -58,6 +58,7 @@ final class AppModel {
     let repository: LibraryRepository
     let store: LibraryStore
     let updater = Updater()
+    let browserBridge: BrowserBridgeCoordinator
 
     /// Rebuilt per access so it always uses the current contact email from Settings.
     var pipeline: ImportPipeline {
@@ -98,11 +99,32 @@ final class AppModel {
     var paletteRequested = 0
     var aiSettingsRequested = 0
     var settingsRequested = 0
+    var browserPairingRequested = 0
 
     init(repository: LibraryRepository, store: LibraryStore) {
         self.repository = repository
         self.store = store
+        browserBridge = BrowserBridgeCoordinator(repository: repository, store: store)
+        browserBridge.onOpen = { [weak self] uuid in
+            self?.openFromBrowser(uuid: uuid)
+        }
+        browserBridge.start()
         reload()
+    }
+
+    func requestBrowserPairing() {
+        browserBridge.createPairingCode()
+        browserPairingRequested += 1
+    }
+
+    private func openFromBrowser(uuid: String) {
+        sidebarSelection = .all
+        reload()
+        if let details = try? repository.document(uuid: uuid) {
+            selectedDocumentId = details.id
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.windows.first { $0.title == "Refman" }?.makeKeyAndOrderFront(nil)
     }
 
     static func live() -> AppModel {

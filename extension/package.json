@@ -1,0 +1,19 @@
+{
+  "name": "refman-chrome-extension",
+  "private": true,
+  "version": "0.11.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "package": "npm run build && rm -rf refman-chrome-extension refman-chrome-extension.zip && cd dist && zip -qr ../refman-chrome-extension.zip . && cd .. && unzip -q refman-chrome-extension.zip -d refman-chrome-extension",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.327",
+    "@types/node": "^22.15.21",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.4"
+  }
+}

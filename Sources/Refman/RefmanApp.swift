@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct RefmanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel.live()
+    @State private var model: AppModel
     @AppStorage(SettingsKeys.appearance) private var appearance = AppAppearance.light.rawValue
 
     init() {
@@ -25,6 +25,7 @@ struct RefmanApp: App {
         }
         // Build-time icon export: render the icon and exit before any UI setup.
         AppIcon.exportIfRequested()
+        _model = State(initialValue: AppModel.live())
         // The Gemini provider was removed (Google ended free CLI login); migrate
         // any stale selection back to a working provider.
         if UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) == "gemini" {
@@ -75,6 +76,12 @@ struct RefmanApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Quick Open…") { model.requestPalette() }
                     .keyboardShortcut("k", modifiers: [.command])
+                Button("Pair Chrome Extension…") {
+                    guard NSApplication.shared.keyWindow?.identifier == MainWindowMarker.identifier
+                    else { return }
+                    model.requestBrowserPairing()
+                }
+                    .keyboardShortcut("p", modifiers: [.command])
                 Button("Settings…") { model.requestSettings() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("AI Settings…") { model.requestAISettings() }

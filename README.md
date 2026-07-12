@@ -57,9 +57,25 @@ pulls the latest GitHub release and relaunches, no quarantine step needed.
 ## Test
 
 ```sh
-swift test                      # 79 unit/integration tests
+swift test                      # 86 unit/integration tests
 python3 scripts/acp_smoke.py    # end-to-end ACP agent test (needs Ollama)
 ```
+
+## Chrome extension
+
+The extension in `extension/` saves DOI, arXiv, PubMed, generic scholarly
+metadata, and direct PDFs into the running Refman app. Build and load it with:
+
+```sh
+cd extension
+npm install
+npm test
+npm run package
+```
+
+Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and
+select `extension/refman-chrome-extension`. Pair it from **Refman → Settings →
+Chrome Extension**.
 
 ## Layout
 
