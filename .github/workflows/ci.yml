@@ -106,10 +106,22 @@ jobs:
 
           ## Chrome extension
 
-          Download `Refman-Chrome-Extension-<version>.zip`, unzip it, then open
-          `chrome://extensions`. Enable **Developer mode**, choose **Load
-          unpacked**, and select the unzipped folder. With the main Refman
-          window focused, press **⌘P** to pair it.
+          1. Download `Refman-Chrome-Extension-<version>.zip` from the assets
+             below and unzip it.
+          2. Open `chrome://extensions` in Chrome.
+          3. Enable **Developer mode**.
+          4. Choose **Load unpacked**.
+          5. Select the unzipped folder containing `manifest.json`.
+          6. Optionally pin Refman from Chrome's Extensions menu.
+
+          Chrome cannot install the release ZIP directly. It must be unzipped
+          and loaded with **Load unpacked**.
+
+          ### Pair with Refman
+
+          1. Keep Refman running with its main library window focused.
+          2. Press **⌘P**.
+          3. Enter the displayed six-digit code in the extension.
           EOF
       - name: Create release
         env:
