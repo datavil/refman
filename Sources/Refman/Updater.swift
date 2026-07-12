@@ -88,7 +88,7 @@ final class Updater {
             do {
                 let release = try await fetchLatest()
                 let latestVersion = release.tagName
-                let zip = release.assets.first { $0.name.hasSuffix(".zip") }
+                let zip = release.assets.first { $0.name == "Refman-\(latestVersion).zip" }
                 if Self.isNewer(latestVersion, than: Self.currentVersion), let zip,
                     let zipURL = URL(string: zip.browserDownloadURL),
                     let page = URL(string: release.htmlURL)
