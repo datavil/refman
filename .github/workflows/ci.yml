@@ -61,7 +61,7 @@ jobs:
           npm ci
           npm test
           npm run package
-          cp refman-chrome-extension.zip "../Refman-Chrome-Extension-${{ github.ref_name }}.zip"
+          cp refman-chrome-extension.zip "../RefmanChrome-Extension-${{ github.ref_name }}.zip"
       - name: Package dmg
         run: |
           VOL="Refman"
@@ -106,7 +106,7 @@ jobs:
 
           ## Chrome extension
 
-          1. Download `Refman-Chrome-Extension-<version>.zip` from the assets
+          1. Download `RefmanChrome-Extension-<version>.zip` from the assets
              below and unzip it.
           2. Open `chrome://extensions` in Chrome.
           3. Enable **Developer mode**.
@@ -130,7 +130,7 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             "Refman-${{ github.ref_name }}.zip" \
             "Refman-${{ github.ref_name }}.dmg" \
-            "Refman-Chrome-Extension-${{ github.ref_name }}.zip" \
+            "RefmanChrome-Extension-${{ github.ref_name }}.zip" \
             --title "${{ github.ref_name }}" \
             --notes-file release-notes.md \
             --generate-notes
