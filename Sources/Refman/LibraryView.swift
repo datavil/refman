@@ -154,14 +154,16 @@ struct LibraryView: View {
             }
         }
         .background(ToolbarConfigurator())
-        .background(MainWindowMarker())
         .background {
-            // Cmd+F focuses the library search field; scoped to this window so
-            // it doesn't shadow the reader's own Cmd+F find bar.
-            Button { focusLibrarySearch() } label: {}
-                .keyboardShortcut("f", modifiers: .command)
-                .opacity(0)
-                .allowsHitTesting(false)
+            Group {
+                // Window-scoped shortcuts do not shadow Reader or Papers windows.
+                Button { focusLibrarySearch() } label: {}
+                    .keyboardShortcut("f", modifiers: .command)
+                Button { model.requestBrowserPairing() } label: {}
+                    .keyboardShortcut("p", modifiers: .command)
+            }
+            .opacity(0)
+            .allowsHitTesting(false)
         }
         .quickLookPreview($previewURL)
         .task { model.updater.checkInBackgroundIfDue() }

@@ -1,7 +1,7 @@
 import type { Collection, Detection, ImportResult, PageMetadata, RuntimeRequest } from "./shared/types";
 import { pdfStartOffset } from "./shared/pdf";
 
-const bridge = "http://127.0.0.1:23119";
+const bridge = "http://127.0.0.1:51283";
 const maximumPDFBytes = 100 * 1_024 * 1_024;
 
 chrome.runtime.onInstalled.addListener(() => {

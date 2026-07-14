@@ -77,11 +77,8 @@ struct RefmanApp: App {
                 Button("Quick Open…") { model.requestPalette() }
                     .keyboardShortcut("k", modifiers: [.command])
                 Button("Pair Chrome Extension…") {
-                    guard NSApplication.shared.keyWindow?.identifier == MainWindowMarker.identifier
-                    else { return }
                     model.requestBrowserPairing()
                 }
-                    .keyboardShortcut("p", modifiers: [.command])
                 Button("Settings…") { model.requestSettings() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("AI Settings…") { model.requestAISettings() }

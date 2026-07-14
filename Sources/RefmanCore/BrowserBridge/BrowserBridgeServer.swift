@@ -2,7 +2,7 @@ import Foundation
 @preconcurrency import Network
 
 public final class BrowserBridgeServer: @unchecked Sendable {
-    public static let defaultPort: UInt16 = 23_119
+    public static let defaultPort: UInt16 = 51_283
     // A 100 MB PDF expands to roughly 133 MB when base64-encoded in JSON.
     public static let maximumBodySize = 140 * 1_024 * 1_024
 
