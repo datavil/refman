@@ -87,6 +87,25 @@
   .btn-secondary { background: var(--card); color: var(--ink); border-color: var(--line-strong); }
   .btn-secondary:hover { border-color: var(--ink); }
   .dl-sub { font-size: 12.5px; color: var(--muted); margin-top: 14px; min-height: 18px; }
+  .terminal-label { margin-top: 20px; color: var(--muted); font-size: 13.5px; }
+  .install-command {
+    display: flex; align-items: stretch; width: fit-content; max-width: 100%;
+    margin: 10px auto 0; overflow: hidden;
+    background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  }
+  .install-command code {
+    display: block; min-width: 0; padding: 12px 16px;
+    overflow-x: auto; white-space: nowrap; text-align: left;
+  }
+  .copy-command {
+    display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+    border: 0; border-left: 1px solid var(--line-strong); padding: 0 13px;
+    background: rgba(26,26,26,.04); color: var(--ink); cursor: pointer;
+    font: inherit;
+  }
+  .copy-command:hover { background: rgba(26,26,26,.08); }
+  .copy-command svg { width: 15px; height: 15px; }
 
   /* Screenshot */
   .shot { margin: 64px 0 0; perspective: 1600px; }
@@ -125,15 +144,11 @@
   .install h2 { font-size: clamp(26px, 4vw, 38px); letter-spacing: -0.03em; margin-bottom: 14px; }
   .install p { color: rgba(251,251,249,.62); max-width: 520px; margin: 0 auto 32px; }
   .install .btn-primary { background: var(--bg); color: var(--ink); box-shadow: 0 8px 30px rgba(0,0,0,.3); }
-  .terminal-label { margin-top: 26px; color: rgba(251,251,249,.62); font-size: 13.5px; }
-  .install .code {
-    margin: 10px auto 0; display: block; width: fit-content; max-width: 100%;
-    overflow-x: auto; white-space: nowrap; text-align: left;
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
-    border-radius: 10px; padding: 12px 16px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
-    color: rgba(251,251,249,.85);
-  }
+  .install .terminal-label { margin-top: 26px; color: rgba(251,251,249,.62); }
+  .install .install-command { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); }
+  .install .install-command code { color: rgba(251,251,249,.85); }
+  .install .copy-command { border-left-color: rgba(255,255,255,.12); background: rgba(255,255,255,.05); color: var(--bg); }
+  .install .copy-command:hover { background: rgba(255,255,255,.10); }
 
   /* Footer */
   footer { border-top: 1px solid var(--line); padding: 44px 0; color: var(--muted); font-size: 13.5px; }
@@ -168,6 +183,14 @@
         Download for macOS
       </a>
       <a class="btn btn-secondary" href="#features">See what's inside</a>
+    </div>
+    <div class="terminal-label">Or install from Terminal</div>
+    <div class="install-command">
+      <code>curl -LsSf https://refman.datavil.org/install.sh | sh</code>
+      <button class="copy-command" type="button" aria-label="Copy installation command">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+        <span>Copy</span>
+      </button>
     </div>
     <div class="dl-sub" id="download-sub">macOS Native · Apple Silicon · macOS 14+</div>
 
@@ -227,7 +250,13 @@
         Download for macOS
       </a>
       <div class="terminal-label">Or install from Terminal</div>
-      <div class="code">curl -LsSf https://refman.datavil.org/install.sh | sh</div>
+      <div class="install-command">
+        <code>curl -LsSf https://refman.datavil.org/install.sh | sh</code>
+        <button class="copy-command" type="button" aria-label="Copy installation command">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+          <span>Copy</span>
+        </button>
+      </div>
     </div>
   </section>
 </main>
@@ -244,6 +273,21 @@
 
 <script>
   document.getElementById('year').textContent = new Date().getFullYear();
+
+  document.querySelectorAll('.copy-command').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var command = button.parentElement.querySelector('code').textContent;
+      navigator.clipboard.writeText(command).then(function () {
+        var label = button.querySelector('span');
+        label.textContent = 'Copied';
+        button.setAttribute('aria-label', 'Installation command copied');
+        window.setTimeout(function () {
+          label.textContent = 'Copy';
+          button.setAttribute('aria-label', 'Copy installation command');
+        }, 1600);
+      });
+    });
+  });
 
   // Resolve the latest .dmg from GitHub Releases and point the download buttons at it.
   (function () {
