@@ -23,6 +23,17 @@
   tools (`search_library`, `get_document_text`, `get_annotations`, …) that the
   model calls to ground its answers in your actual papers.
 
+## Install
+
+```sh
+curl -LsSf https://refman.datavil.org/install.sh | sh
+```
+
+This installs the latest release in `/Applications`, recursively clears its
+quarantine attribute, and opens Refman. Until releases can be signed with an
+Apple Developer ID, the in-app updater clears quarantine again after every
+update.
+
 ## Run
 
 ```sh
@@ -42,17 +53,8 @@ open dist/Refman.app
 
 The bundle includes both the SwiftUI app and the bundled `refman-agent` used by
 the Assistant. The script ad-hoc signs the app for local use; set
-`SKIP_CODESIGN=1` to skip signing.
-
-On first launch, open Terminal and paste the following, then open the app
-normally:
-
-```sh
-sudo /usr/bin/xattr -dr com.apple.quarantine /Applications/Refman.app
-```
-
-After the first install, the app updates itself: **Refman → Check for Updates…**
-pulls the latest GitHub release and relaunches, no quarantine step needed.
+`SKIP_CODESIGN=1` to skip signing. Installed releases update themselves through
+**Refman → Check for Updates…**.
 
 ## Test
 

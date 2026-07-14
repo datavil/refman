@@ -29,6 +29,8 @@ jobs:
           npm run build
       - name: Smoke-check packaged resources
         run: |
+          sh -n docs/install.sh
+          test -x docs/install.sh
           SKIP_CODESIGN=1 VERSION=ci scripts/build_app.sh
           dist/Refman.app/Contents/MacOS/Refman --check-resources
 
@@ -88,12 +90,20 @@ jobs:
           cat > release-notes.md <<'EOF'
           ## Install
 
-          Download the `.dmg` (drag Refman to Applications) or the `.zip`.
+          Install the latest release, clear quarantine, and open Refman:
 
-          Refman is not signed with an Apple Developer ID, so macOS Gatekeeper
-          blocks it on first launch ("Apple could not verify… is free of
-          malware"). To open it, run this once in Terminal (sudo is needed
-          because the app files aren't owned by your user):
+          ```sh
+          curl -LsSf https://refman.datavil.org/install.sh | sh
+          ```
+
+          You can alternatively download the `.dmg` (drag Refman to
+          Applications) or the `.zip`.
+
+          When installing a downloaded asset manually, note that Refman is not
+          signed with an Apple Developer ID, so macOS Gatekeeper blocks it on
+          first launch ("Apple could not verify… is free of malware"). To open
+          it, run this once in Terminal (sudo is needed because the app files
+          aren't owned by your user):
 
           ```
           sudo xattr -dr com.apple.quarantine /Applications/Refman.app
