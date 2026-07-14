@@ -90,3 +90,10 @@ Tests/RefmanCoreTests/
 
 See `todo.md` for status and roadmap (citeproc bibliographies and CloudKit
 sync across devices are the next phases).
+
+## Acknowledgments
+
+Citation formatting uses [citeproc-js](https://github.com/Juris-M/citeproc-js) and
+styles and locales from the [Citation Style Language project](https://citationstyles.org/).
+Bundled CSL styles and locales are distributed under CC BY-SA 3.0 with their
+original author and contributor metadata retained.

@@ -220,11 +220,24 @@ import Testing
         #expect(out.contains("Einstein"))
     }
 
-    @Test func everyBundledStyleLoads() throws {
+    @Test func notesStyleProducesFullCitation() throws {
+        let out = try Citeproc.format([einstein], style: .chicagoNotes, mode: .citation)
+        #expect(out.contains("Einstein"))
+        #expect(out.lowercased().contains("electrodynamics"))
+    }
+
+    @Test func everyBundledStyleLoadsInBothModes() throws {
         for style in Citeproc.Style.allCases {
-            let out = try Citeproc.format([einstein], style: style, mode: .bibliography)
-            #expect(!out.isEmpty, "style \(style.rawValue) produced no output")
+            let bibliography = try Citeproc.format([einstein], style: style, mode: .bibliography)
+            #expect(!bibliography.isEmpty, "style \(style.rawValue) produced no bibliography")
+
+            let citation = try Citeproc.format([einstein], style: style, mode: .citation)
+            #expect(!citation.isEmpty, "style \(style.rawValue) produced no citation")
         }
+    }
+
+    @Test func allBundledCitationResourcesAreAvailable() {
+        #expect(Citeproc.resourcesAvailable())
     }
 
     @Test func emptyInputReturnsEmpty() throws {

@@ -677,15 +677,21 @@ struct LibraryView: View {
     /// switches the style (and remembers it) before copying.
     private func copyMenu(_ title: String, ids: Set<Int64>, mode: Citeproc.Mode) -> some View {
         Menu {
-            ForEach(Citeproc.Style.allCases, id: \.self) { style in
-                Button {
-                    citationStyleRaw = style.rawValue
-                    model.copyCitation(documentIds: Array(ids), style: style, mode: mode)
-                } label: {
-                    if style == citationStyle {
-                        Label(style.label, systemImage: "checkmark")
-                    } else {
-                        Text(style.label)
+            ForEach(Citeproc.Style.Category.allCases, id: \.self) { category in
+                Menu(category.label) {
+                    ForEach(
+                        Citeproc.Style.allCases.filter { $0.category == category }, id: \.self
+                    ) { style in
+                        Button {
+                            citationStyleRaw = style.rawValue
+                            model.copyCitation(documentIds: Array(ids), style: style, mode: mode)
+                        } label: {
+                            if style == citationStyle {
+                                Label(style.label, systemImage: "checkmark")
+                            } else {
+                                Text(style.label)
+                            }
+                        }
                     }
                 }
             }
