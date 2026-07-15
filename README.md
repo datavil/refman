@@ -4,24 +4,18 @@
 
 <h1 align="center">Refman</h1>
 
-<p align="center">A native macOS reference manager (Mendeley-style), built with Swift.</p>
+<p align="center">A native reference manager for macOS.</p>
 
-> 🤖 **Vibecoded with Claude.** This project is written end-to-end by
-> [Claude](https://claude.com) (Anthropic) via Claude Code — every line of code,
-> from the database layer to the SwiftUI app to this README, produced by AI from
-> natural-language prompts. No line was hand-written. Enjoy it for what it is.
+Refman keeps papers, citations, and annotations together in a fast, focused
+desktop app.
 
-- **Library**: SQLite (GRDB) with FTS5 full-text search; PDFs stored
-  content-addressed by sha256 under `~/Library/Application Support/Refman/Storage`.
-- **Import**: drag-and-drop or ⌘I; extracts text via PDFKit, scans for DOI/arXiv
-  IDs, resolves metadata against CrossRef and the arXiv API. `.bib`/`.ris` import too.
-- **Reader**: PDFKit viewer with highlight/underline/note annotations, written
-  into the PDF itself *and* mirrored to SQLite (searchable, listable, syncable).
-- **Export**: BibTeX, RIS, CSL-JSON.
-- **Assistant**: local-LLM chat over the [Agent Client Protocol](https://agentclientprotocol.com).
-  The app spawns `refman-agent` (an ACP↔Ollama bridge) and exposes library
-  tools (`search_library`, `get_document_text`, `get_annotations`, …) that the
-  model calls to ground its answers in your actual papers.
+- Import PDFs, BibTeX, and RIS
+- Find papers by title, author, DOI, arXiv ID, or full text
+- Read and annotate PDFs, take notes
+- Use collections to organize your papers
+- Export BibTeX, RIS, and CSL-JSON
+- Chat with your library using a local or online (OpenAI, Claude) large language models
+- Save papers from your browser using chrome extension
 
 ## Install
 
@@ -29,71 +23,13 @@
 curl -LsSf https://refman.datavil.org/install.sh | sh
 ```
 
-This installs the latest release in `/Applications`, recursively clears its
-quarantine attribute, and opens Refman. Until releases can be signed with an
-Apple Developer ID, the in-app updater clears quarantine again after every
-update.
+Requires macOS 14 or later. See [Technical notes](TECHNICAL.md) to build from
+source, run tests, or configure integrations.
 
-## Run
+## License
 
-```sh
-swift run Refman
-```
+Refman is available under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+Non-commercial use, modification, and distribution are permitted. Commercial
+use requires a separate license from the copyright holder.
 
-Requirements: macOS 14+, Swift 6.2+ toolchain. For the assistant: [Ollama](https://ollama.com)
-running locally with at least one tool-capable model pulled (e.g. `ollama pull qwen3:14b`).
-Override with `REFMAN_OLLAMA_MODEL` / `REFMAN_OLLAMA_HOST`.
-
-## Build a macOS app
-
-```sh
-scripts/build_app.sh
-open dist/Refman.app
-```
-
-The bundle includes both the SwiftUI app and the bundled `refman-agent` used by
-the Assistant. The script ad-hoc signs the app for local use; set
-`SKIP_CODESIGN=1` to skip signing. Installed releases update themselves through
-**Refman → Check for Updates…**.
-
-## Test
-
-```sh
-swift test                      # 86 unit/integration tests
-python3 scripts/acp_smoke.py    # end-to-end ACP agent test (needs Ollama)
-```
-
-## Chrome extension
-
-The extension in `extension/` saves DOI, arXiv, PubMed, generic scholarly
-metadata, and direct PDFs into the running Refman app. Build and load it with:
-
-```sh
-cd extension
-npm install
-npm test
-npm run package
-```
-
-Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and
-select `extension/refman-chrome-extension`. Pair it from **Refman → Settings →
-Chrome Extension**.
-
-## Layout
-
-```
-Sources/RefmanCore/    # UI-free engine: database, storage, metadata, citation IO, ACP
-Sources/Refman/        # SwiftUI app (library browser, PDF reader, assistant panel)
-Sources/RefmanAgent/   # refman-agent: ACP agent bridging to Ollama
-Tests/RefmanCoreTests/
-```
-
-See `todo.md` for status and roadmap (citeproc bibliographies and CloudKit
-sync across devices are the next phases).
-
-## Acknowledgments
-
-Citation formatting uses [citeproc-js](https://github.com/Juris-M/citeproc-js) and
-styles and locales from the [Citation Style Language project](https://citationstyles.org/).
-Bundled CSL styles and locales are distributed under CC BY-SA 3.0 with their
-original author and contributor metadata retained.
+Bundled third-party components remain subject to their own licenses.
