@@ -1228,6 +1228,8 @@ struct PageIndicator: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
+        .padding(.trailing, 8)
+        .fixedSize(horizontal: true, vertical: false)
         .onChange(of: reader.currentPageIndex) { syncText() }
         .onChange(of: focused) { if !focused { syncText() } }
         .onAppear { syncText() }
