@@ -10,6 +10,76 @@ fail() {
     exit 1
 }
 
+render_download_progress() {
+    progress_label="$1"
+    progress_color=true
+    [ -n "${NO_COLOR:-}" ] && progress_color=false
+
+    awk \
+        -v 'RS=\r' \
+        -v "label=$progress_label" \
+        -v "color=$progress_color" '
+        function draw(percent, complete, bar, remainder, i) {
+            complete = int(percent * 24 / 100)
+            bar = ""
+            remainder = ""
+            for (i = 0; i < complete; i++) bar = bar "━"
+            for (i = complete; i < 24; i++) remainder = remainder "─"
+            printf "\r\033[2K  %s  %s%s%s%s%s  %3d%%", \
+                label, accent, bar, dim, remainder, reset, percent
+            fflush()
+        }
+
+        BEGIN {
+            if (color == "true") {
+                accent = sprintf("%c[36m", 27)
+                dim = sprintf("%c[2m", 27)
+                reset = sprintf("%c[0m", 27)
+            }
+            draw(0)
+        }
+
+        match($0, /[0-9][0-9]*\.[0-9]%/) {
+            percent = int(substr($0, RSTART, RLENGTH - 1) + 0)
+            if (percent != last_percent) {
+                draw(percent)
+                last_percent = percent
+            }
+        }
+
+        index($0, "curl:") > 0 { errors = errors $0 "\n" }
+
+        END {
+            printf "\n"
+            if (errors != "") printf "%s", errors
+        }
+    ' >&2
+}
+
+download_archive() {
+    download_url="$1"
+    download_destination="$2"
+    download_label="$3"
+
+    if [ ! -t 2 ] || [ "${TERM:-dumb}" = "dumb" ]; then
+        echo "$download_label..."
+        curl -fLsS "$download_url" -o "$download_destination"
+        return
+    fi
+
+    progress_status_file="$temporary_directory/curl-status"
+    {
+        download_status=0
+        curl -fL --progress-bar "$download_url" -o "$download_destination" \
+            2>&1 || download_status=$?
+        printf '%s\n' "$download_status" > "$progress_status_file"
+    } | render_download_progress "$download_label"
+
+    download_status="$(cat "$progress_status_file")"
+    rm -f "$progress_status_file"
+    return "$download_status"
+}
+
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 [ "$(uname -s)" = "Darwin" ] || fail "Refman requires macOS"
 [ -d "$INSTALL_DIRECTORY" ] || fail "install directory does not exist: $INSTALL_DIRECTORY"
@@ -36,8 +106,7 @@ archive="$temporary_directory/Refman.zip"
 unpacked="$temporary_directory/unpacked"
 mkdir "$unpacked"
 
-echo "Downloading Refman $tag..."
-curl -fL --progress-bar "$archive_url" -o "$archive"
+download_archive "$archive_url" "$archive" "Downloading Refman $tag"
 /usr/bin/ditto -x -k "$archive" "$unpacked"
 
 new_app="$unpacked/Refman.app"
