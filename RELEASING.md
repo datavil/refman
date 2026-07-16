@@ -25,7 +25,9 @@ npm test --prefix extension
 npm run package --prefix extension
 unzip -p extension/refman-chrome-extension.zip manifest.json
 git diff --check
-VERSION=0.12.0 scripts/build_app.sh
+ARCHITECTURES="arm64 x86_64" VERSION=0.12.0 scripts/build_app.sh
+lipo dist/Refman.app/Contents/MacOS/Refman -verify_arch arm64 x86_64
+lipo dist/Refman.app/Contents/MacOS/refman-agent -verify_arch arm64 x86_64
 dist/Refman.app/Contents/MacOS/Refman --check-resources
 plutil -extract CFBundleShortVersionString raw dist/Refman.app/Contents/Info.plist
 codesign --verify --deep --strict dist/Refman.app

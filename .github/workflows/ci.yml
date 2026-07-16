@@ -51,9 +51,12 @@ jobs:
           cache-dependency-path: extension/package-lock.json
       - name: Build app bundle
         env:
+          ARCHITECTURES: arm64 x86_64
           VERSION: ${{ github.ref_name }}
         run: |
           VERSION="${VERSION#v}" scripts/build_app.sh
+          lipo dist/Refman.app/Contents/MacOS/Refman -verify_arch arm64 x86_64
+          lipo dist/Refman.app/Contents/MacOS/refman-agent -verify_arch arm64 x86_64
       - name: Package zip
         run: |
           ditto -c -k --keepParent dist/Refman.app "Refman-${{ github.ref_name }}.zip"

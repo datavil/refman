@@ -6,9 +6,11 @@ APP_NAME="Refman"
 PRODUCT_NAME="Refman"
 AGENT_NAME="refman-agent"
 CONFIGURATION="${CONFIGURATION:-release}"
+ARCHITECTURES="${ARCHITECTURES:-$(uname -m)}"
 BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-app.refman.Refman}"
 VERSION="${VERSION:-0.1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
+MACOS_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-14.0}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -17,31 +19,56 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 cd "$ROOT_DIR"
 
-swift build -c "$CONFIGURATION" --product "$PRODUCT_NAME"
-swift build -c "$CONFIGURATION" --product "$AGENT_NAME"
+PRODUCT_BINARIES=()
+AGENT_BINARIES=()
+RESOURCE_BIN_DIR=""
 
-BIN_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
-PRODUCT_BINARY="$BIN_DIR/$PRODUCT_NAME"
-AGENT_BINARY="$BIN_DIR/$AGENT_NAME"
+for architecture in $ARCHITECTURES; do
+    case "$architecture" in
+        arm64|x86_64) ;;
+        *)
+            echo "error: unsupported architecture: $architecture" >&2
+            exit 1
+            ;;
+    esac
 
-if [[ ! -x "$PRODUCT_BINARY" ]]; then
-    echo "error: missing executable: $PRODUCT_BINARY" >&2
-    exit 1
-fi
+    TRIPLE="$architecture-apple-macosx$MACOS_DEPLOYMENT_TARGET"
+    swift build -c "$CONFIGURATION" --triple "$TRIPLE" --product "$PRODUCT_NAME"
+    swift build -c "$CONFIGURATION" --triple "$TRIPLE" --product "$AGENT_NAME"
 
-if [[ ! -x "$AGENT_BINARY" ]]; then
-    echo "error: missing executable: $AGENT_BINARY" >&2
-    exit 1
-fi
+    BIN_DIR="$(swift build -c "$CONFIGURATION" --triple "$TRIPLE" --show-bin-path)"
+    PRODUCT_BINARY="$BIN_DIR/$PRODUCT_NAME"
+    AGENT_BINARY="$BIN_DIR/$AGENT_NAME"
+
+    if [[ ! -x "$PRODUCT_BINARY" ]]; then
+        echo "error: missing executable: $PRODUCT_BINARY" >&2
+        exit 1
+    fi
+
+    if [[ ! -x "$AGENT_BINARY" ]]; then
+        echo "error: missing executable: $AGENT_BINARY" >&2
+        exit 1
+    fi
+
+    PRODUCT_BINARIES+=("$PRODUCT_BINARY")
+    AGENT_BINARIES+=("$AGENT_BINARY")
+    RESOURCE_BIN_DIR="$BIN_DIR"
+done
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-install -m 755 "$PRODUCT_BINARY" "$MACOS_DIR/$PRODUCT_NAME"
-install -m 755 "$AGENT_BINARY" "$MACOS_DIR/$AGENT_NAME"
+if [[ ${#PRODUCT_BINARIES[@]} -eq 1 ]]; then
+    install -m 755 "${PRODUCT_BINARIES[0]}" "$MACOS_DIR/$PRODUCT_NAME"
+    install -m 755 "${AGENT_BINARIES[0]}" "$MACOS_DIR/$AGENT_NAME"
+else
+    lipo -create "${PRODUCT_BINARIES[@]}" -output "$MACOS_DIR/$PRODUCT_NAME"
+    lipo -create "${AGENT_BINARIES[@]}" -output "$MACOS_DIR/$AGENT_NAME"
+    chmod 755 "$MACOS_DIR/$PRODUCT_NAME" "$MACOS_DIR/$AGENT_NAME"
+fi
 
 shopt -s nullglob
-for resource_bundle in "$BIN_DIR"/*.bundle; do
+for resource_bundle in "$RESOURCE_BIN_DIR"/*.bundle; do
     cp -R "$resource_bundle" "$RESOURCES_DIR/"
 done
 shopt -u nullglob
@@ -87,7 +114,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>$MACOS_DEPLOYMENT_TARGET</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

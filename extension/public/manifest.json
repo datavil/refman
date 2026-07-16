@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Refman",
   "description": "Save research articles and PDFs to your local Refman library.",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "permissions": ["activeTab", "contextMenus", "scripting", "storage"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "host_permissions": ["http://127.0.0.1:51283/*"],
