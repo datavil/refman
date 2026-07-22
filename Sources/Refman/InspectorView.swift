@@ -22,119 +22,122 @@ struct InspectorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let pdfURL = model.pdfURL(for: details),
-                let documentID = details.document.id
-            {
-                Button {
-                    openWindow(id: "reader", value: documentID)
-                } label: {
-                    VStack {
-                        Label("Open PDF", systemImage: "book")
-                        PDFPageThumbnail(url: pdfURL)
+        Form {
+            Section {
+                Picker("Type", selection: $draft.type) {
+                    ForEach(DocumentType.allCases, id: \.self) { type in
+                        Text(label(for: type)).tag(type)
                     }
-                    .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
-                .padding(.vertical)
-                .accessibilityLabel("Open PDF")
-                .help("Open PDF")
+                TextField("Title", text: $draft.title, axis: .vertical).lineLimit(1...4)
+                TextField("Authors", text: $authorsText, prompt: Text("Family, Given and …"))
+                TextField("Year", value: $draft.year, format: .number.grouping(.never))
+                TextField("Venue", text: bind(\.venue))
+                TextField("Volume", text: bind(\.volume))
+                TextField("Issue", text: bind(\.issue))
+                TextField("Pages", text: bind(\.pages))
+                TextField("DOI", text: bind(\.doi))
+                TextField("arXiv ID", text: bind(\.arxivId))
+                TextField("URL", text: bind(\.url))
+            } header: {
+                VStack {
+                    if let pdfURL = model.pdfURL(for: details),
+                        let documentID = details.document.id
+                    {
+                        Button {
+                            openWindow(id: "reader", value: documentID)
+                        } label: {
+                            VStack {
+                                Label("Open PDF", systemImage: "book")
+                                PDFPageThumbnail(url: pdfURL)
+                            }
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
+                        .padding(.vertical)
+                        .accessibilityLabel("Open PDF")
+                        .help("Open PDF")
+                    }
+                    Text("Reference")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
-            Form {
-                Section("Reference") {
-                    Picker("Type", selection: $draft.type) {
-                        ForEach(DocumentType.allCases, id: \.self) { type in
-                            Text(label(for: type)).tag(type)
-                        }
-                    }
-                    TextField("Title", text: $draft.title, axis: .vertical).lineLimit(1...4)
-                    TextField("Authors", text: $authorsText, prompt: Text("Family, Given and …"))
-                    TextField("Year", value: $draft.year, format: .number.grouping(.never))
-                    TextField("Venue", text: bind(\.venue))
-                    TextField("Volume", text: bind(\.volume))
-                    TextField("Issue", text: bind(\.issue))
-                    TextField("Pages", text: bind(\.pages))
-                    TextField("DOI", text: bind(\.doi))
-                    TextField("arXiv ID", text: bind(\.arxivId))
-                    TextField("URL", text: bind(\.url))
-                }
-
-                Section {
-                    ScrollableMaxHeight(maxHeight: 220) {
-                        if isEditingAbstract {
-                            TextField("Abstract", text: bind(\.abstract), axis: .vertical)
-                                .lineLimit(3...)
-                                .multilineTextAlignment(.leading)
-                                .labelsHidden()
-                                .focused($abstractFocused)
-                        } else if let abstract = draft.abstract, !abstract.isEmpty {
-                            Text(abstract)
-                                .lineSpacing(3)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text("No abstract available.")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text("Abstract")
-                        Spacer()
-                        Button(
-                            isEditingAbstract ? "Done" : "Edit",
-                            systemImage: isEditingAbstract ? "checkmark" : "pencil"
-                        ) {
-                            isEditingAbstract.toggle()
-                            abstractFocused = isEditingAbstract
-                        }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
+            Section {
+                ScrollableMaxHeight(maxHeight: 220) {
+                    if isEditingAbstract {
+                        TextField("Abstract", text: bind(\.abstract), axis: .vertical)
+                            .lineLimit(3...)
+                            .multilineTextAlignment(.leading)
+                            .labelsHidden()
+                            .focused($abstractFocused)
+                    } else if let abstract = draft.abstract, !abstract.isEmpty {
+                        Text(abstract)
+                            .lineSpacing(3)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text("No abstract available.")
+                            .foregroundStyle(.secondary)
                     }
                 }
-
-                insightSection("Summary", \.summary, insight: .summary, action: "Summarize")
-                insightSection("Key Points", \.keyPoints, insight: .keyPoints, action: "Key Points")
-                insightSection("Methods", \.methods, insight: .methods, action: "Methods")
-                insightSection("Limitations", \.limitations, insight: .limitations, action: "Limitations")
-
-                Section("Tags") {
-                    if !details.tags.isEmpty {
-                        FlowTags(tags: details.tags) { tag in
-                            model.removeTag(tag.id!)
-                        }
+            } header: {
+                HStack {
+                    Text("Abstract")
+                    Spacer()
+                    Button(
+                        isEditingAbstract ? "Done" : "Edit",
+                        systemImage: isEditingAbstract ? "checkmark" : "pencil"
+                    ) {
+                        isEditingAbstract.toggle()
+                        abstractFocused = isEditingAbstract
                     }
-                    TextField("Add tag…", text: $newTag)
-                        .onSubmit {
-                            model.addTag(newTag.trimmingCharacters(in: .whitespaces))
-                            newTag = ""
-                        }
-                }
-
-                Section {
-                    Button("Save Changes") {
-                        save()
-                        isEditingAbstract = false
-                    }
-                    .keyboardShortcut("s", modifiers: [.command])
-                    .disabled(!hasChanges)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 }
             }
-            .formStyle(.grouped)
-            // Insights are generated elsewhere (the AI panel or library menu); keep
-            // the editable draft in sync so saving metadata edits never clobbers them.
-            .onChange(of: details.document) {
-                draft.summary = details.document.summary
-                draft.keyPoints = details.document.keyPoints
-                draft.methods = details.document.methods
-                draft.limitations = details.document.limitations
-            }
-            // Refresh a newly extracted abstract without discarding an unsaved edit.
-            .onChange(of: details.document.abstract) { previous, abstract in
-                if draft.abstract == previous {
-                    draft.abstract = abstract
+
+            insightSection("Summary", \.summary, insight: .summary, action: "Summarize")
+            insightSection("Key Points", \.keyPoints, insight: .keyPoints, action: "Key Points")
+            insightSection("Methods", \.methods, insight: .methods, action: "Methods")
+            insightSection("Limitations", \.limitations, insight: .limitations, action: "Limitations")
+
+            Section("Tags") {
+                if !details.tags.isEmpty {
+                    FlowTags(tags: details.tags) { tag in
+                        model.removeTag(tag.id!)
+                    }
                 }
+                TextField("Add tag…", text: $newTag)
+                    .onSubmit {
+                        model.addTag(newTag.trimmingCharacters(in: .whitespaces))
+                        newTag = ""
+                    }
+            }
+
+            Section {
+                Button("Save Changes") {
+                    save()
+                    isEditingAbstract = false
+                }
+                .keyboardShortcut("s", modifiers: [.command])
+                .disabled(!hasChanges)
+            }
+        }
+        .formStyle(.grouped)
+        // Insights are generated elsewhere (the AI panel or library menu); keep
+        // the editable draft in sync so saving metadata edits never clobbers them.
+        .onChange(of: details.document) {
+            draft.summary = details.document.summary
+            draft.keyPoints = details.document.keyPoints
+            draft.methods = details.document.methods
+            draft.limitations = details.document.limitations
+        }
+        // Refresh a newly extracted abstract without discarding an unsaved edit.
+        .onChange(of: details.document.abstract) { previous, abstract in
+            if draft.abstract == previous {
+                draft.abstract = abstract
             }
         }
     }
