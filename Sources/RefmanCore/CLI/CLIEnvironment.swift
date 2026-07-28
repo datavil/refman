@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// Helpers for locating command-line tools (Codex, Claude, Ollama, …) from a
@@ -69,3 +70,4 @@ public enum CLIEnvironment {
             : path
     }
 }
+#endif

@@ -4,6 +4,7 @@
 
 - macOS 14 or later
 - Swift 6.2 or later
+- Xcode 26 or later for the iPad app
 - [Ollama](https://ollama.com) with a tool-capable model for the assistant
 
 ## Run from source
@@ -27,6 +28,20 @@ the app ad hoc; set `SKIP_CODESIGN=1` to skip signing.
 
 Unsigned releases clear their quarantine attribute during installation and
 after in-app updates.
+
+## Build the iPad app
+
+Open `Refman.xcodeproj`, select the **Refman iOS** scheme and an iPad simulator,
+then run the app. The iPad target requires iPadOS 26 or later.
+
+The iPad app supports the library, search, PDF import and reading, metadata,
+collection and tag browsing, Currently Reading, and Trash. The assistant is
+intentionally Mac-only because iPadOS cannot run its local CLI subprocesses.
+
+To use the Mac library on iPad, connect it from the iPad sidebar and choose the
+existing `Refman` folder in iCloud Drive. Refman stores a security-scoped
+bookmark, so this is required only once. Keep Refman open on one device at a
+time because both apps use the same SQLite file directly.
 
 ## Test
 
@@ -55,6 +70,7 @@ Chrome Extension**.
 ```text
 Sources/RefmanCore/    UI-independent database, storage, metadata, citation, and ACP logic
 Sources/Refman/        SwiftUI application
+RefmanIOS/             iPad SwiftUI application
 Sources/RefmanAgent/   ACP-to-Ollama bridge
 Tests/RefmanCoreTests/ Core tests
 ```

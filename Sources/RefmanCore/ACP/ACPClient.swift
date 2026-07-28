@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// ACP client side: spawns an agent subprocess and drives it over JSON-RPC/ndjson.
@@ -159,3 +160,4 @@ public final class ACPClient: @unchecked Sendable {
         process?.terminate()
     }
 }
+#endif

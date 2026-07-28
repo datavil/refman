@@ -6,4 +6,12 @@ node_modules/
 extension/*.zip
 extension/refman-chrome-extension/
 *.xcodeproj
+!Refman.xcodeproj/
+Refman.xcodeproj/*
+!Refman.xcodeproj/project.pbxproj
+!Refman.xcodeproj/project.xcworkspace/
+Refman.xcodeproj/project.xcworkspace/*
+!Refman.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+!Refman.xcodeproj/project.xcworkspace/xcshareddata/
+!Refman.xcodeproj/project.xcworkspace/xcshareddata/**
 .DS_Store

@@ -4,7 +4,7 @@
 
 <h1 align="center">Refman</h1>
 
-<p align="center">A native reference manager for macOS.</p>
+<p align="center">A native reference manager for macOS and iPadOS.</p>
 
 Refman keeps papers, citations, and annotations together in a fast, focused
 desktop app.
@@ -23,8 +23,8 @@ desktop app.
 curl -LsSf https://refman.datavil.org/install.sh | sh
 ```
 
-Requires macOS 14 or later. See [Technical notes](TECHNICAL.md) to build from
-source, run tests, or configure integrations.
+Requires macOS 14 or later. See [Technical notes](TECHNICAL.md) to build the
+Mac or iPad app from source, run tests, or configure integrations.
 
 ## License
 

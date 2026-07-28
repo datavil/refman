@@ -36,10 +36,14 @@ public enum LibraryLocation {
     /// unsandboxed app can read/write it with no entitlements; the iCloud
     /// daemon syncs whatever lands there.
     public static func iCloudDriveRoot() -> URL? {
+#if os(macOS)
         let cloudDocs = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
         guard FileManager.default.fileExists(atPath: cloudDocs.path) else { return nil }
         return cloudDocs.appendingPathComponent(folderName)
+#else
+        nil
+#endif
     }
 
     /// True when the given root lives inside an iCloud container.

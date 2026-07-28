@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Refman",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v26)],
     products: [
         .library(name: "RefmanCore", targets: ["RefmanCore"]),
         .executable(name: "Refman", targets: ["Refman"]),
