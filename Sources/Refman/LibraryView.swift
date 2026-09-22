@@ -22,7 +22,11 @@ struct LibraryView: View {
     @State private var identifierText = ""
     @AppStorage("documentSortField") private var sortField = DocumentSortField.added
     @AppStorage("documentSortAscending") private var sortAscending = false
-    @State private var sortOrder = [KeyPathComparator(\DocumentDetails.sortAddedAt, order: .reverse)]
+    // Seeded from the saved sort: setting it later (e.g. in onAppear) reenters the
+    // table's delegate while it loads.
+    @State private var sortOrder = [LibraryView.comparator(
+        DocumentSortField(rawValue: UserDefaults.standard.string(forKey: "documentSortField") ?? "") ?? .added,
+        ascending: UserDefaults.standard.bool(forKey: "documentSortAscending"))]
     @State private var columnCustomization = TableColumnCustomization<DocumentDetails>()
     @State private var showingImportReport = false
     @State private var showingInspector = false
@@ -153,7 +157,6 @@ struct LibraryView: View {
         }
         .quickLookPreview($previewURL)
         .task { model.updater.checkInBackgroundIfDue() }
-        .onAppear(perform: applySort)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
         }
@@ -291,20 +294,20 @@ struct LibraryView: View {
     }
 
     private func applySort() {
-        let sortDirection: SortOrder = sortAscending ? .forward : .reverse
-        switch sortField {
-        case .title:
-            sortOrder = [KeyPathComparator(\DocumentDetails.sortTitle, order: sortDirection)]
-        case .authors:
-            sortOrder = [KeyPathComparator(\DocumentDetails.sortAuthors, order: sortDirection)]
-        case .year:
-            sortOrder = [KeyPathComparator(\DocumentDetails.sortYear, order: sortDirection)]
-        case .venue:
-            sortOrder = [KeyPathComparator(\DocumentDetails.sortVenue, order: sortDirection)]
-        case .added:
-            sortOrder = [KeyPathComparator(\DocumentDetails.sortAddedAt, order: sortDirection)]
-        case .modified:
-            sortOrder = [KeyPathComparator(\DocumentDetails.sortModifiedAt, order: sortDirection)]
+        sortOrder = [Self.comparator(sortField, ascending: sortAscending)]
+    }
+
+    private static func comparator(
+        _ field: DocumentSortField, ascending: Bool
+    ) -> KeyPathComparator<DocumentDetails> {
+        let order: SortOrder = ascending ? .forward : .reverse
+        switch field {
+        case .title: return KeyPathComparator(\DocumentDetails.sortTitle, order: order)
+        case .authors: return KeyPathComparator(\DocumentDetails.sortAuthors, order: order)
+        case .year: return KeyPathComparator(\DocumentDetails.sortYear, order: order)
+        case .venue: return KeyPathComparator(\DocumentDetails.sortVenue, order: order)
+        case .added: return KeyPathComparator(\DocumentDetails.sortAddedAt, order: order)
+        case .modified: return KeyPathComparator(\DocumentDetails.sortModifiedAt, order: order)
         }
     }
 

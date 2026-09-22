@@ -4,6 +4,31 @@ import SwiftUI
 
 /// Stops the Ollama server Refman started (if any) when the app quits.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var clickMonitor: Any?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // SwiftUI lists and tables don't take keyboard focus when clicked, so the
+        // accent-colored selection stays on whichever list had focus first (the
+        // sidebar or the document table). Hand focus to the clicked list.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            guard let window = event.window, let content = window.contentView,
+                let hit = content.hitTest(content.convert(event.locationInWindow, from: nil))
+            else { return event }
+            var view: NSView? = hit
+            while let current = view {
+                if current is NSText || current is NSTextField { return event }  // editing
+                if let table = current as? NSTableView {
+                    if window.firstResponder !== table, table.acceptsFirstResponder {
+                        window.makeFirstResponder(table)
+                    }
+                    return event
+                }
+                view = current.superview
+            }
+            return event
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         ProviderSetupModel.stopStartedServer()
     }
