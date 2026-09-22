@@ -20,6 +20,17 @@ public struct DocumentDetails: Identifiable, Equatable, Hashable, Sendable {
         authors.map(\.displayName).joined(separator: ", ")
     }
 
+    /// Compact byline: "Kosar", "Kosar and Erbas", or "Kosar et al.".
+    public var shortAuthors: String {
+        let names = authors.map { $0.family.isEmpty ? $0.displayName : $0.family }
+        switch names.count {
+        case 0: return ""
+        case 1: return names[0]
+        case 2: return "\(names[0]) and \(names[1])"
+        default: return "\(names[0]) et al."
+        }
+    }
+
     // Non-optional keys for table sorting.
     public var sortTitle: String { document.title }
     public var sortAuthors: String { authorsText }

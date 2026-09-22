@@ -20,11 +20,12 @@ struct LibraryView: View {
     @State private var previewURL: URL?
     @State private var showingAddPopover = false
     @State private var identifierText = ""
-    @State private var sortField = DocumentSortField.title
-    @State private var sortDirection = SortOrder.forward
-    @State private var sortOrder = [KeyPathComparator(\DocumentDetails.sortTitle)]
+    @AppStorage("documentSortField") private var sortField = DocumentSortField.added
+    @AppStorage("documentSortAscending") private var sortAscending = false
+    @State private var sortOrder = [KeyPathComparator(\DocumentDetails.sortAddedAt, order: .reverse)]
     @State private var columnCustomization = TableColumnCustomization<DocumentDetails>()
     @State private var showingImportReport = false
+    @State private var showingInspector = false
     @State private var showingPalette = false
     @State private var showingBrowserPairing = false
     @State private var searchTask: Task<Void, Never>?
@@ -100,7 +101,7 @@ struct LibraryView: View {
             sidebar
                 // Fixed width: the sidebar is unresizable but can be toggled.
                 .navigationSplitViewColumnWidth(LayoutReset.sidebarWidth)
-        } content: {
+        } detail: {
             Group {
                 if model.sidebarSelection == .duplicates {
                     DuplicatesView()
@@ -108,26 +109,9 @@ struct LibraryView: View {
                     documentTable
                 }
             }
-            .navigationSplitViewColumnWidth(min: 400, ideal: 560)
-        } detail: {
-            Group {
-                if model.selectedDocumentIds.count > 1 {
-                    multiSelectionSummary
-                } else if let details = model.selectedDocument {
-                    InspectorView(details: details)
-                        .id(details.document.id)  // reset editing state on selection change
-                } else if case .collection(let id) = model.sidebarSelection,
-                    let collection = model.collections.first(where: { $0.id == id })
-                {
-                    CollectionDetailView(collection: collection)
-                        .id(id)
-                } else {
-                    ContentUnavailableView(
-                        "No Selection", systemImage: "doc.text",
-                        description: Text("Select a document, or drop PDFs anywhere to import."))
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 392, ideal: 470)
+        }
+        .inspector(isPresented: $showingInspector) {
+            inspectorContent
         }
         .searchable(text: $model.searchText, prompt: "Search title, authors, full text")
         .onChange(of: model.searchText) {
@@ -141,6 +125,8 @@ struct LibraryView: View {
         // Defer reloads off the current update cycle: mutating the Table's data
         // synchronously from .onChange reenters the backing NSTableView delegate.
         .onChange(of: model.sidebarSelection) {
+            // The inspector is closed by default; selecting a collection opens it.
+            if case .collection = model.sidebarSelection { setInspector(true) }
             searchTask?.cancel()
             Task { @MainActor in model.reload() }
         }
@@ -167,6 +153,7 @@ struct LibraryView: View {
         }
         .quickLookPreview($previewURL)
         .task { model.updater.checkInBackgroundIfDue() }
+        .onAppear(perform: applySort)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
         }
@@ -200,6 +187,9 @@ struct LibraryView: View {
                     addPopover
                 }
             }
+            ToolbarItem(placement: .navigation) {
+                sortMenu
+            }
             if inTrash {
                 ToolbarItem {
                     Button(role: .destructive) {
@@ -210,9 +200,6 @@ struct LibraryView: View {
                     .help("Permanently delete all documents in the Trash")
                     .disabled(model.documents.isEmpty)
                 }
-            }
-            ToolbarItem {
-                sortMenu
             }
             ToolbarItem {
                 if let progress = model.importProgress {
@@ -260,7 +247,7 @@ struct LibraryView: View {
                 ForEach(DocumentSortField.allCases) { field in
                     Button {
                         sortField = field
-                        sortDirection = field.defaultDirection
+                        sortAscending = field.defaultDirection == .forward
                         applySort()
                     } label: {
                         if sortField == field {
@@ -274,20 +261,20 @@ struct LibraryView: View {
             Divider()
             Section("Direction") {
                 Button {
-                    sortDirection = .forward
+                    sortAscending = true
                     applySort()
                 } label: {
-                    if sortDirection == .forward {
+                    if sortAscending {
                         Label("Ascending", systemImage: "checkmark")
                     } else {
                         Text("Ascending")
                     }
                 }
                 Button {
-                    sortDirection = .reverse
+                    sortAscending = false
                     applySort()
                 } label: {
-                    if sortDirection == .reverse {
+                    if !sortAscending {
                         Label("Descending", systemImage: "checkmark")
                     } else {
                         Text("Descending")
@@ -295,12 +282,16 @@ struct LibraryView: View {
                 }
             }
         } label: {
-            Label("Sort By", systemImage: "arrow.up.arrow.down")
+            Label(sortField.label, systemImage: sortAscending ? "arrow.up" : "arrow.down")
         }
+        .labelStyle(.titleAndIcon)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
         .help("Sort documents")
     }
 
     private func applySort() {
+        let sortDirection: SortOrder = sortAscending ? .forward : .reverse
         switch sortField {
         case .title:
             sortOrder = [KeyPathComparator(\DocumentDetails.sortTitle, order: sortDirection)]
@@ -315,6 +306,40 @@ struct LibraryView: View {
         case .modified:
             sortOrder = [KeyPathComparator(\DocumentDetails.sortModifiedAt, order: sortDirection)]
         }
+    }
+
+    /// Shows or hides the inspector without the slide: its animation re-lays out
+    /// the whole window every frame and stutters.
+    private func setInspector(_ shown: Bool) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { showingInspector = shown }
+    }
+
+    private var inspectorContent: some View {
+        Group {
+            if model.selectedDocumentIds.count > 1 {
+                multiSelectionSummary
+            } else if let details = model.selectedDocument {
+                InspectorView(details: details)
+                    .id(details.document.id)  // reset editing state on selection change
+            } else if case .collection(let id) = model.sidebarSelection,
+                let collection = model.collections.first(where: { $0.id == id })
+            {
+                CollectionDetailView(collection: collection)
+                    .id(id)
+            } else {
+                ContentUnavailableView(
+                    "No Selection", systemImage: "doc.text",
+                    description: Text("Select a document, or drop PDFs anywhere to import."))
+            }
+        }
+        .inspectorColumnWidth(min: 392, ideal: LayoutReset.inspectorWidth)
+        // Fill the column so the opaque background covers all of it, not just
+        // the content (e.g. the "No Selection" placeholder).
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The inspector column is translucent; keep it opaque like the list.
+        .background(.windowBackground)
     }
 
     private var sidebar: some View {
@@ -393,6 +418,8 @@ struct LibraryView: View {
             }
         }
         .listStyle(.sidebar)
+        // macOS 27 tints sidebar icons with the accent color; keep them monochrome.
+        .labelStyle(MonochromeIconLabelStyle())
         .confirmationDialog(
             "Delete “\(collectionToDelete?.name ?? "")”?",
             isPresented: Binding(
@@ -544,12 +571,17 @@ struct LibraryView: View {
             sortOrder: $sortOrder,
             columnCustomization: $columnCustomization
         ) {
+            TableColumn("Authors", value: \.sortAuthors) { details in
+                Text(details.shortAuthors).lineLimit(1)
+            }
+            .width(min: 130, ideal: 150, max: 200)
+            .customizationID("authors")
             TableColumn("Title", value: \.sortTitle) { details in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(details.document.title.isEmpty ? "Untitled" : details.document.title)
-                        .lineLimit(2)
-                    if !details.authorsText.isEmpty {
-                        Text(details.authorsText)
+                        .lineLimit(1)
+                    if let venue = details.document.venue, !venue.isEmpty {
+                        Text(venue)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -563,11 +595,6 @@ struct LibraryView: View {
             }
             .width(48)
             .customizationID("year")
-            TableColumn("Venue", value: \.sortVenue) { details in
-                Text(details.document.venue ?? "—").lineLimit(1)
-            }
-            .width(min: 100, ideal: 160)
-            .customizationID("venue")
             TableColumn("PDF") { details in
                 if details.document.fileHash != nil {
                     Image(systemName: "document.circle")
@@ -584,6 +611,17 @@ struct LibraryView: View {
             }
         }
         .alternatingRowBackgrounds(.disabled)
+        .onChange(of: model.selectedDocumentIds) {
+            if !model.selectedDocumentIds.isEmpty { setInspector(true) }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Inspector", systemImage: "sidebar.trailing") {
+                    setInspector(!showingInspector)
+                }
+                .help(showingInspector ? "Hide Inspector" : "Show Inspector")
+            }
+        }
         .contextMenu(forSelectionType: Int64.self) { ids in
             documentContextMenu(ids)
         } primaryAction: { ids in
@@ -881,14 +919,16 @@ enum LayoutReset {
     /// unreliably). Leaves the window size alone and never overrides a layout the
     /// user has already saved.
     static func applyDefaultsIfFresh(_ split: NSSplitView) {
-        guard !appliedFreshDefaults, split.subviews.count >= 3 else { return }
+        guard !appliedFreshDefaults, split.subviews.count >= 2 else { return }
         let hasSavedLayout = UserDefaults.standard.dictionaryRepresentation().keys
             .contains { $0.hasPrefix("NSSplitView Subview Frames") }
         guard !hasSavedLayout else { return }
         appliedFreshDefaults = true
         split.layoutSubtreeIfNeeded()
         split.setPosition(sidebarWidth, ofDividerAt: 0)
-        split.setPosition(split.bounds.width - inspectorWidth, ofDividerAt: 1)
+        if split.subviews.count >= 3 {
+            split.setPosition(split.bounds.width - inspectorWidth, ofDividerAt: 1)
+        }
     }
 
     static func run() {
@@ -902,13 +942,15 @@ enum LayoutReset {
         for window in NSApp.windows {
             guard let split = window.contentView?.firstSplitViewInTree,
                 split.delegate is NSSplitViewController,
-                split.subviews.count >= 3
+                split.subviews.count >= 2
             else { continue }
             window.setContentSize(windowSize)
             window.center()
             split.layoutSubtreeIfNeeded()
             split.setPosition(sidebarWidth, ofDividerAt: 0)
-            split.setPosition(split.bounds.width - inspectorWidth, ofDividerAt: 1)
+            if split.subviews.count >= 3 {
+                split.setPosition(split.bounds.width - inspectorWidth, ofDividerAt: 1)
+            }
         }
     }
 }
@@ -1717,6 +1759,18 @@ private struct ImportReportView: View {
         case .imported: return "Imported"
         case .duplicate: return "Duplicate"
         case .failed: return "Failed"
+        }
+    }
+}
+
+/// Draws a label's icon in the surrounding foreground style instead of the
+/// accent tint macOS 27 applies to sidebar icons.
+private struct MonochromeIconLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Label {
+            configuration.title
+        } icon: {
+            configuration.icon.foregroundStyle(.foreground)
         }
     }
 }

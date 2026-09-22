@@ -34,9 +34,19 @@ struct PDFPageThumbnail: View {
         .frame(width: 225, height: 300)
         .task(id: url) {
             isLoading = true
-            thumbnail = PDFDocument(url: url)?.page(at: 0)?.thumbnail(
-                of: CGSize(width: 600, height: 800), for: .cropBox)
+            let image = await Self.renderFirstPage(of: url)
+            guard !Task.isCancelled else { return }
+            thumbnail = image.map { NSImage(cgImage: $0, size: .zero) }
             isLoading = false
         }
+    }
+
+    /// Loads and renders off the main thread: an iCloud-evicted (dataless) PDF
+    /// downloads on first read, which can take a minute.
+    @concurrent
+    private nonisolated static func renderFirstPage(of url: URL) async -> CGImage? {
+        PDFDocument(url: url)?.page(at: 0)?
+            .thumbnail(of: CGSize(width: 600, height: 800), for: .cropBox)
+            .cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
 }

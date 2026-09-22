@@ -26,6 +26,8 @@ struct RefmanApp: App {
         // Build-time icon export: render the icon and exit before any UI setup.
         AppIcon.exportIfRequested()
         _model = State(initialValue: AppModel.live())
+        // No window tabs: hides the tab bar macOS shows above the content.
+        NSWindow.allowsAutomaticWindowTabbing = false
         // The Gemini provider was removed (Google ended free CLI login); migrate
         // any stale selection back to a working provider.
         if UserDefaults.standard.string(forKey: SettingsKeys.llmProvider) == "gemini" {

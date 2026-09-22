@@ -8,6 +8,20 @@ import Testing
         try LibraryRepository(AppDatabase.inMemory())
     }
 
+    @Test func shortAuthors() {
+        func short(_ authors: [Author]) -> String {
+            DocumentDetails(document: Document(title: "T"), authors: authors).shortAuthors
+        }
+        let kosar = Author(given: "Ayse", family: "Kosar")
+        let erbas = Author(given: "Can", family: "Erbas")
+        #expect(short([]) == "")
+        #expect(short([kosar]) == "Kosar")
+        #expect(short([kosar, erbas]) == "Kosar and Erbas")
+        #expect(short([kosar, erbas, Author(family: "Li")]) == "Kosar et al.")
+        // No family name (e.g. a consortium stored as given): fall back to the full name.
+        #expect(short([Author(given: "ENCODE Consortium", family: "")]) == "ENCODE Consortium")
+    }
+
     @Test func insertAndFetchDocument() throws {
         let repo = try makeRepo()
         let details = try repo.insert(
