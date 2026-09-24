@@ -78,6 +78,8 @@ final class AppModel {
     /// Collection ids whose summary is currently being generated.
     var generatingCollectionSummaries: Set<Int64> = []
     var collections: [RefmanCore.Collection] = []
+    /// Direct collection memberships per document, for the list's icon column.
+    var collectionIdsByDocument: [Int64: [Int64]] = [:]
     var tags: [Tag] = []
     var sidebarSelection: SidebarItem = .all
     var selectedDocumentIds: Set<Int64> = []
@@ -189,6 +191,7 @@ final class AppModel {
     func reload() {
         do {
             collections = try repository.allCollections()
+            collectionIdsByDocument = try repository.collectionIdsByDocument()
             tags = try repository.allTags()
             if !searchText.isEmpty {
                 documents = try repository.search(searchText, scope: selectedSearchScope)
@@ -876,6 +879,41 @@ final class AppModel {
             try? repository.add(documentId: id, toCollection: collectionId)
         }
         reload()
+    }
+
+    /// Collections shown as icons in a document's list row: the deepest direct
+    /// memberships (ancestors of another membership are dropped) with a custom
+    /// icon, excluding the collection currently being viewed.
+    func iconCollections(forDocument id: Int64) -> [RefmanCore.Collection] {
+        let ids = Set(collectionIdsByDocument[id] ?? [])
+        let ancestorIds = Set(
+            collections.filter { ids.contains($0.id ?? -1) }.flatMap(ancestorIds(of:)))
+        return collections.filter { collection in
+            guard let collectionId = collection.id, ids.contains(collectionId),
+                !ancestorIds.contains(collectionId),
+                sidebarSelection != .collection(collectionId)
+            else { return false }
+            return collection.icon.map { $0 != "folder" } ?? false
+        }
+    }
+
+    /// Full "Parent › Child" path of a collection, for tooltips.
+    func collectionPath(_ collection: RefmanCore.Collection) -> String {
+        let names = ancestorIds(of: collection).reversed().compactMap { id in
+            collections.first { $0.id == id }?.name
+        }
+        return (names + [collection.name]).joined(separator: " › ")
+    }
+
+    /// Ids of a collection's ancestors, nearest parent first.
+    private func ancestorIds(of collection: RefmanCore.Collection) -> [Int64] {
+        var ids: [Int64] = []
+        var parentId = collection.parentId
+        while let id = parentId, !ids.contains(id) {
+            ids.append(id)
+            parentId = collections.first { $0.id == id }?.parentId
+        }
+        return ids
     }
 
     func setCollectionIcon(id: Int64, to icon: String?) {

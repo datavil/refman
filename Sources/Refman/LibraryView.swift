@@ -574,6 +574,15 @@ struct LibraryView: View {
             sortOrder: $sortOrder,
             columnCustomization: $columnCustomization
         ) {
+            TableColumn(Text(Image(systemName: "folder")).accessibilityLabel("Collections")) {
+                (details: DocumentDetails) in
+                CollectionIconsCell(
+                    items: model.iconCollections(forDocument: details.id).map {
+                        (icon: $0.icon ?? "folder", path: model.collectionPath($0))
+                    })
+            }
+            .width(min: 24, ideal: 56, max: 90)
+            .customizationID("collections")
             TableColumn("Authors", value: \.sortAuthors) { details in
                 Text(details.shortAuthors).lineLimit(1)
             }

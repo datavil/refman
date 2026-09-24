@@ -30,6 +30,29 @@ struct AppModelTests {
         #expect(model.documents.map(\.id) == [included.id])
     }
 
+    @Test func iconCollectionsSkipDefaultIconsAndCurrentCollection() throws {
+        let (model, root) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let doc = try model.repository.insert(Document(title: "Paper"))
+        let parent = try model.repository.createCollection(name: "Thesis")
+        let child = try model.repository.createCollection(name: "Methods", parentId: parent.id)
+        let plain = try model.repository.createCollection(name: "Plain")
+        try model.repository.setCollectionIcon(id: parent.id!, to: "graduationcap")
+        try model.repository.setCollectionIcon(id: child.id!, to: "flask")
+        for collection in [parent, child, plain] {
+            try model.repository.add(documentId: doc.id, toCollection: collection.id!)
+        }
+        model.reload()
+
+        let shown = model.iconCollections(forDocument: doc.id)
+        #expect(shown.map(\.name) == ["Methods"])
+        #expect(model.collectionPath(shown[0]) == "Thesis › Methods")
+
+        model.sidebarSelection = .collection(child.id!)
+        #expect(model.iconCollections(forDocument: doc.id).isEmpty)
+    }
+
     @Test func trashAndRestoreUpdateVisibleState() throws {
         let (model, root) = try makeModel()
         defer { try? FileManager.default.removeItem(at: root) }

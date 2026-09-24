@@ -633,6 +633,15 @@ public final class LibraryRepository: Sendable {
         }
     }
 
+    /// Direct collection memberships, keyed by document id.
+    public func collectionIdsByDocument() throws -> [Int64: [Int64]] {
+        try dbWriter.read { db in
+            try CollectionDocument.fetchAll(db).reduce(into: [:]) {
+                $0[$1.documentId, default: []].append($1.collectionId)
+            }
+        }
+    }
+
     public func remove(documentId: Int64, fromCollection collectionId: Int64) throws {
         try dbWriter.write { db in
             try db.execute(

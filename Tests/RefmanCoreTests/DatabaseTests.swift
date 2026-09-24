@@ -173,6 +173,7 @@ import Testing
 
         #expect(try repo.allDocuments().count == 2)
         #expect(try repo.documentCount(in: collection.id!) == 1)
+        #expect(try repo.collectionIdsByDocument() == [docA.id: [collection.id!]])
         let scoped = try repo.allDocuments(in: collection.id!)
         #expect(scoped.map(\.document.title) == ["A"])
 
