@@ -30,6 +30,7 @@ struct LibraryView: View {
     @State private var columnCustomization = TableColumnCustomization<DocumentDetails>()
     @State private var showingImportReport = false
     @State private var showingInspector = false
+    @State private var sidebarVisibility = NavigationSplitViewVisibility.all
     @State private var showingPalette = false
     @State private var showingBrowserPairing = false
     @State private var searchTask: Task<Void, Never>?
@@ -101,7 +102,7 @@ struct LibraryView: View {
     var body: some View {
         @Bindable var model = model
 
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
             sidebar
                 // Fixed width: the sidebar is unresizable but can be toggled.
                 .navigationSplitViewColumnWidth(LayoutReset.sidebarWidth)
@@ -116,6 +117,14 @@ struct LibraryView: View {
         }
         .inspector(isPresented: $showingInspector) {
             inspectorContent
+        }
+        .background {
+            // Keyboard-only toggle; the split view supplies the sidebar toolbar button.
+            Button("Toggle Sidebar") {
+                sidebarVisibility = sidebarVisibility == .detailOnly ? .all : .detailOnly
+            }
+            .keyboardShortcut("1", modifiers: .command)
+            .hidden()
         }
         .searchable(text: $model.searchText, prompt: "Search title, authors, full text")
         .onChange(of: model.searchText) {
@@ -581,7 +590,7 @@ struct LibraryView: View {
                         (icon: $0.icon ?? "folder", path: model.collectionPath($0))
                     })
             }
-            .width(min: 24, ideal: 56, max: 90)
+            .width(20)
             .customizationID("collections")
             TableColumn("Authors", value: \.sortAuthors) { details in
                 Text(details.shortAuthors).lineLimit(1)
@@ -631,7 +640,8 @@ struct LibraryView: View {
                 Button("Inspector", systemImage: "sidebar.trailing") {
                     setInspector(!showingInspector)
                 }
-                .help(showingInspector ? "Hide Inspector" : "Show Inspector")
+                .keyboardShortcut("2", modifiers: .command)
+                .help(showingInspector ? "Hide Inspector (⌘2)" : "Show Inspector (⌘2)")
             }
         }
         .contextMenu(forSelectionType: Int64.self) { ids in
